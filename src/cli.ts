@@ -6,7 +6,12 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { CheckpointStore, assertTicketStatus, defaultStoryStackHome } from "./checkpoint/store.js";
+import {
+  CheckpointStore,
+  assertTicketStatus,
+  defaultLegacyStateRoot,
+  defaultStoryStackHome,
+} from "./checkpoint/store.js";
 import { REQUIRED_SECTIONS } from "./checkpoint/schema.js";
 import { packageRootFromModule } from "./checkpoint/template.js";
 import { serializeCheckpoint } from "./checkpoint/frontmatter.js";
@@ -16,9 +21,12 @@ import {
   applyUninstall,
   formatInstallPlan,
   formatUninstallPlan,
+  inspectPlatformInstallations,
   planInstall,
   planUninstall,
 } from "./installer.js";
+import { parseInstallScope, parsePlatformTarget, type InstallScope, type TargetSelection } from "../adapters/registry.js";
+import { classifyCommand, hookCommandFromPayload } from "./safety.js";
 
 const execFileAsync = promisify(execFile);
 const BOOLEAN_OPTIONS = new Set([
@@ -28,6 +36,8 @@ const BOOLEAN_OPTIONS = new Set([
   "mark-validated",
   "allow-approval-change",
   "confirm-user-approved",
+  "explicitly-requested",
+  "permanent-only",
   "help",
 ]);
 
@@ -113,6 +123,55 @@ function safeDisplay(value: string): string {
   return value.replace(/[\0-\x1f\x7f]/gu, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
+function aliasedStringOption(parsed: ParsedArguments, preferred: string, legacy: string): string | undefined {
+  const preferredValue = stringOption(parsed, preferred);
+  const legacyValue = stringOption(parsed, legacy);
+  if (preferredValue !== undefined && legacyValue !== undefined && preferredValue !== legacyValue) {
+    throw new StoryStackError(`--${preferred} and --${legacy} disagree`, "INVALID_ARGUMENTS");
+  }
+  return preferredValue ?? legacyValue;
+}
+
+function targetAndScope(parsed: ParsedArguments): { target: TargetSelection; scope: InstallScope } {
+  try {
+    return {
+      target: parsePlatformTarget(stringOption(parsed, "target") ?? "claude"),
+      scope: parseInstallScope(stringOption(parsed, "scope") ?? "global"),
+    };
+  } catch (error) {
+    throw new StoryStackError(errorMessage(error), "INVALID_ARGUMENTS");
+  }
+}
+
+function installerEnvironmentOptions(
+  parsed: ParsedArguments,
+  context: Required<Pick<CliContext, "cwd" | "env" | "packageRoot">>,
+) {
+  const { target, scope } = targetAndScope(parsed);
+  const justinStackHome = defaultStoryStackHome(context.env);
+  const projectRoot = path.resolve(stringOption(parsed, "project-root") ?? context.cwd);
+  const skillRoots = {
+    ...(context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME || context.env.STORY_STACK_SKILLS_HOME
+      ? { claude: path.resolve(context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME ?? context.env.STORY_STACK_SKILLS_HOME ?? "") }
+      : {}),
+    ...(context.env.JUSTINSTACK_BOB_SKILLS_HOME
+      ? { bob: path.resolve(context.env.JUSTINSTACK_BOB_SKILLS_HOME) }
+      : {}),
+    ...(context.env.JUSTINSTACK_CODEX_SKILLS_HOME
+      ? { codex: path.resolve(context.env.JUSTINSTACK_CODEX_SKILLS_HOME) }
+      : {}),
+  };
+  return {
+    packageRoot: context.packageRoot,
+    userHome: path.resolve(context.env.JUSTINSTACK_USER_HOME ?? os.homedir()),
+    justinStackHome,
+    target,
+    scope,
+    projectRoot,
+    skillRoots,
+  };
+}
+
 function statusExitCode(status: string): number {
   if (status === "current") return 0;
   if (status === "stale-but-reconcilable") return 2;
@@ -122,19 +181,22 @@ function statusExitCode(status: string): number {
 
 function usage(): string {
   return [
-    "story-stack <command>",
+    "justinstack <command>",
     "",
     "Commands:",
-    "  doctor",
-    "  state init --project <slug> --ticket <KEY> [--repo <path>] [--base-branch <name>] [--objective <text>]",
-    "  state path|show|validate|snapshot|recovery|complete [--project <slug> --ticket <KEY>] [--repo <path>]",
+    "  doctor --target <claude|bob|codex|all> --scope <project|global>",
+    "  state init --workspace <slug> --story <KEY> [--repo <path>] [--base-branch <name>] [--objective <text>]",
+    "  state path|show|validate|snapshot|bundle-status|repair|recovery|complete [--workspace <slug> --story <KEY>] [--repo <path>]",
+    "  state migrate --workspace <slug> --story <KEY>",
     "  state update [identity] [--repo <path>] --body-file <path> [--section <heading>] [--status <status>]",
     "  state approve-plan [identity] [--repo <path>] --body-file <path> --confirm-user-approved",
     "  state list [--repo <path>]",
-    "  install [--dry-run] [--apply] [--confirm-overwrite STORY-STACK]",
-    "  uninstall [--dry-run] [--apply]",
+    "  install --target <claude|bob|codex|all> --scope <project|global> [--apply]",
+    "  uninstall --target <claude|bob|codex|all> --scope <project|global> [--apply]",
+    "  safety check --command <proposed-command>",
     "",
     "All commands accept --json. Install and uninstall are dry-run unless --apply is explicit.",
+    "--project/--ticket and the story-stack executable remain deprecated compatibility aliases.",
   ].join("\n");
 }
 
@@ -156,32 +218,27 @@ async function nearestWritableAncestor(target: string): Promise<string | null> {
 }
 
 async function findCheckpointLocks(storyHome: string): Promise<string[]> {
-  const stateRoot = path.join(storyHome, "state");
+  const stateRoot = path.join(storyHome, "workspaces");
   const locks: string[] = [];
-  let projects;
-  try {
-    projects = await readdir(stateRoot, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    return ["State directory could not be inspected for locks."];
-  }
-  for (const project of projects.filter((entry) => entry.isDirectory())) {
-    const projectPath = path.join(stateRoot, project.name);
-    let tickets;
+  async function visit(directory: string, depth: number): Promise<void> {
+    if (depth > 4) return;
+    let entries;
     try {
-      tickets = await readdir(projectPath, { withFileTypes: true });
-    } catch {
-      continue;
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
     }
-    for (const ticket of tickets.filter((entry) => entry.isDirectory())) {
-      const lockPath = path.join(projectPath, ticket.name, "context.md.lock");
-      try {
-        await access(lockPath, constants.F_OK);
-        locks.push(lockPath);
-      } catch {
-        // No lock for this checkpoint.
-      }
+    for (const entry of entries) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(entryPath, depth + 1);
+      else if (entry.isFile() && /^\.[A-Z][A-Z0-9-]+\.lock$/u.test(entry.name)) locks.push(entryPath);
     }
+  }
+  try {
+    await visit(stateRoot, 0);
+  } catch {
+    return ["Workspace directory could not be inspected for locks."];
   }
   return locks;
 }
@@ -190,7 +247,7 @@ async function runDoctor(
   parsed: ParsedArguments,
   context: Required<Pick<CliContext, "cwd" | "env" | "io" | "packageRoot">>,
 ): Promise<number> {
-  assertAllowedOptions(parsed, []);
+  assertAllowedOptions(parsed, ["target", "scope", "project-root"]);
   if (parsed.positionals.length !== 1) throw new StoryStackError("doctor accepts no positional arguments", "INVALID_ARGUMENTS");
   const major = Number.parseInt(process.versions.node.split(".")[0] ?? "0", 10);
   let gitVersion: string | null = null;
@@ -210,21 +267,30 @@ async function runDoctor(
     templateAvailable = false;
   }
   const checkpointLocks = await findCheckpointLocks(storyHome);
+  const platforms = await inspectPlatformInstallations(installerEnvironmentOptions(parsed, context));
   const checks = {
     node: { ok: major >= 20, version: process.versions.node, required: ">=20" },
     git: { ok: gitVersion !== null, version: gitVersion },
     checkpointTemplate: { ok: templateAvailable, path: templatePath },
     storyHome: { ok: writableAncestor !== null, path: storyHome, writableAncestor },
     checkpointLocks: { ok: checkpointLocks.length === 0, count: checkpointLocks.length, paths: checkpointLocks },
+    platforms,
     networkChecksPerformed: false,
   };
-  const ok = Object.values(checks).every((item) => typeof item !== "object" || !("ok" in item) || item.ok);
+  const ok = major >= 20 && gitVersion !== null && templateAvailable && writableAncestor !== null &&
+    checkpointLocks.length === 0 && platforms.every((platform) => platform.ok);
   const human = [
     `Node ${checks.node.ok ? "OK" : "FAIL"}: ${checks.node.version} (requires ${checks.node.required})`,
     `Git ${checks.git.ok ? "OK" : "FAIL"}: ${checks.git.version ?? "not found"}`,
     `Checkpoint template ${checks.checkpointTemplate.ok ? "OK" : "FAIL"}: ${checks.checkpointTemplate.path}`,
     `Story home ${checks.storyHome.ok ? "OK" : "FAIL"}: ${checks.storyHome.path}`,
     `Checkpoint locks ${checks.checkpointLocks.ok ? "OK" : "CHECK"}: ${checks.checkpointLocks.count}`,
+    ...platforms.flatMap((platform) => [
+      `${platform.displayName} ${platform.ok ? "OK" : "MISSING/STALE"}: ${platform.skillsRoot}`,
+      `  installed=${platform.installed.length} missing=${platform.missing.length} stale=${platform.stale.length} obsolete=${platform.obsolete.length}`,
+      ...platform.reminders.map((reminder) => `  ${reminder.level.toUpperCase()}: ${reminder.message}`),
+      ...platform.configurationProposals.map((proposal) => `  PROPOSE ONLY ${proposal.kind}: ${proposal.targetPath}`),
+    ]),
     "Network checks: none",
   ].join("\n");
   emit(context.io, flag(parsed, "json"), { ok, checks }, human);
@@ -236,7 +302,11 @@ async function resolveIdentity(
   parsed: ParsedArguments,
   repositoryPath: string,
 ) {
-  return store.resolveIdentity(stringOption(parsed, "project"), stringOption(parsed, "ticket"), repositoryPath);
+  return store.resolveIdentity(
+    aliasedStringOption(parsed, "workspace", "project"),
+    aliasedStringOption(parsed, "story", "ticket"),
+    repositoryPath,
+  );
 }
 
 async function runState(
@@ -249,20 +319,21 @@ async function runState(
     return action ? 0 : 1;
   }
   if (parsed.positionals.length > 2) throw new StoryStackError("Too many positional arguments", "INVALID_ARGUMENTS");
-  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "update", "approve-plan", "complete", "recovery"]);
+  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "bundle-status", "repair", "migrate", "update", "approve-plan", "complete", "recovery"]);
   if (!knownActions.has(action)) throw new StoryStackError(`Unknown state command '${action}'`, "INVALID_ARGUMENTS");
   const store = new CheckpointStore({
-    stateRoot: path.join(defaultStoryStackHome(context.env), "state"),
+    storyStackHome: defaultStoryStackHome(context.env),
+    legacyStateRoot: defaultLegacyStateRoot(context.env),
     packageRoot: context.packageRoot,
   });
   const repositoryPath = path.resolve(stringOption(parsed, "repo") ?? context.cwd);
   const wantsJson = flag(parsed, "json");
 
   if (action === "init") {
-    assertAllowedOptions(parsed, ["project", "ticket", "repo", "base-branch", "objective"]);
-    const project = stringOption(parsed, "project");
-    const ticket = stringOption(parsed, "ticket");
-    if (!project || !ticket) throw new StoryStackError("state init requires --project and --ticket", "INVALID_ARGUMENTS");
+    assertAllowedOptions(parsed, ["workspace", "story", "project", "ticket", "repo", "base-branch", "objective"]);
+    const project = aliasedStringOption(parsed, "workspace", "project");
+    const ticket = aliasedStringOption(parsed, "story", "ticket");
+    if (!project || !ticket) throw new StoryStackError("state init requires --workspace and --story", "INVALID_ARGUMENTS");
     const identity = store.normalizeIdentity(project, ticket);
     const baseBranch = stringOption(parsed, "base-branch");
     const objective = stringOption(parsed, "objective");
@@ -291,9 +362,15 @@ async function runState(
   if (action === "list") {
     assertAllowedOptions(parsed, ["repo"]);
     const repoWasSupplied = stringOption(parsed, "repo") !== undefined;
-    const results = await store.list(repoWasSupplied ? repositoryPath : undefined);
-    const payload = results.map((item) => ({
+    const repositoryFilter = repoWasSupplied ? repositoryPath : undefined;
+    const current = await store.list(repositoryFilter);
+    const legacy = await store.listLegacy(repositoryFilter);
+    const payload = [
+      ...current.map((item) => ({ ...item, layout: "bundle" as const })),
+      ...legacy.map((item) => ({ ...item, layout: "legacy" as const })),
+    ].map((item) => ({
       path: item.checkpointPath,
+      layout: item.layout,
       ...(item.metadata
         ? {
             project: item.metadata.project_slug,
@@ -311,7 +388,7 @@ async function runState(
           .map((item) =>
             "error" in item
               ? `INVALID ${safeDisplay(item.path)}: ${safeDisplay(item.error ?? "unknown error")}`
-              : `${item.project}/${item.ticket} [${item.status}] ${safeDisplay(item.path)}`,
+              : `${item.project}/${item.ticket} [${item.status}; ${item.layout}] ${safeDisplay(item.path)}`,
           )
           .join("\n");
     emit(context.io, wantsJson, { ok: true, checkpoints: payload }, human);
@@ -319,13 +396,18 @@ async function runState(
   }
 
   const actionOptions: Readonly<Record<string, readonly string[]>> = {
-    path: ["project", "ticket", "repo"],
-    show: ["project", "ticket", "repo"],
-    validate: ["project", "ticket", "repo"],
-    snapshot: ["project", "ticket", "repo", "mark-validated"],
+    path: ["workspace", "story", "project", "ticket", "repo"],
+    show: ["workspace", "story", "project", "ticket", "repo"],
+    validate: ["workspace", "story", "project", "ticket", "repo"],
+    snapshot: ["workspace", "story", "project", "ticket", "repo", "mark-validated"],
+    "bundle-status": ["workspace", "story", "project", "ticket", "repo"],
+    repair: ["workspace", "story", "project", "ticket", "repo"],
+    migrate: ["workspace", "story", "project", "ticket", "repo"],
     update: [
       "project",
       "ticket",
+      "workspace",
+      "story",
       "repo",
       "body-file",
       "section",
@@ -333,12 +415,38 @@ async function runState(
       "mark-validated",
       "allow-approval-change",
     ],
-    "approve-plan": ["project", "ticket", "repo", "body-file", "confirm-user-approved"],
-    complete: ["project", "ticket", "repo"],
-    recovery: ["project", "ticket", "repo"],
+    "approve-plan": ["workspace", "story", "project", "ticket", "repo", "body-file", "confirm-user-approved"],
+    complete: ["workspace", "story", "project", "ticket", "repo"],
+    recovery: ["workspace", "story", "project", "ticket", "repo"],
   };
   assertAllowedOptions(parsed, actionOptions[action] ?? []);
-  const identity = await resolveIdentity(store, parsed, repositoryPath);
+  let identity;
+  if (action === "migrate") {
+    const workspace = aliasedStringOption(parsed, "workspace", "project");
+    const story = aliasedStringOption(parsed, "story", "ticket");
+    if ((workspace === undefined) !== (story === undefined)) {
+      throw new StoryStackError("Provide both --workspace and --story, or neither", "INCOMPLETE_IDENTITY");
+    }
+    if (workspace !== undefined && story !== undefined) {
+      identity = store.normalizeIdentity(workspace, story);
+    } else {
+      const matches = (await store.listLegacy(repositoryPath)).filter((item) => item.metadata !== undefined);
+      if (matches.length !== 1) {
+        throw new StoryStackError(
+          matches.length === 0
+            ? "No legacy checkpoint matches the active repository"
+            : "Legacy checkpoint is ambiguous; specify --workspace and --story",
+          matches.length === 0 ? "CHECKPOINT_NOT_FOUND" : "AMBIGUOUS_TICKET",
+          4,
+        );
+      }
+      const metadata = matches[0]?.metadata;
+      if (!metadata) throw new StoryStackError("Matching legacy checkpoint is invalid", "INVALID_CHECKPOINT", 4);
+      identity = { projectSlug: metadata.project_slug, ticketKey: metadata.ticket_key };
+    }
+  } else {
+    identity = await resolveIdentity(store, parsed, repositoryPath);
+  }
 
   if (action === "path") {
     const checkpoint = store.pathFor(identity);
@@ -365,6 +473,39 @@ async function runState(
     ].join("\n");
     emit(context.io, wantsJson, { ok: result.status === "current", ...result }, human);
     return statusExitCode(result.status);
+  }
+  if (action === "bundle-status") {
+    const health = await store.bundleHealth(identity);
+    emit(
+      context.io,
+      wantsJson,
+      { ok: health.status === "current", ...health },
+      [`Continuity bundle: ${health.status}`, ...health.reasons.map((reason) => `- ${safeDisplay(reason)}`)].join("\n"),
+    );
+    return health.status === "current" ? 0 : health.status === "repairable" ? 2 : 4;
+  }
+  if (action === "repair") {
+    const result = await store.snapshot(identity, repositoryPath);
+    const repairedFiles = result.repairedFiles ?? [];
+    emit(
+      context.io,
+      wantsJson,
+      { ok: true, changed: result.changed, repairedFiles, path: result.checkpointPath },
+      repairedFiles.length === 0
+        ? `Continuity bundle already current: ${result.checkpointPath}`
+        : `Repaired continuity projections: ${repairedFiles.join(", ")}`,
+    );
+    return 0;
+  }
+  if (action === "migrate") {
+    const result = await store.migrateLegacy(identity);
+    emit(
+      context.io,
+      wantsJson,
+      { ok: true, migrated: result.changed, path: result.checkpointPath, repairedFiles: result.repairedFiles ?? [] },
+      `${result.changed ? "Migrated" : "Preserved matching"} legacy checkpoint at ${result.checkpointPath}; source retained.`,
+    );
+    return 0;
   }
   if (action === "snapshot") {
     const result = await store.snapshot(identity, repositoryPath, { markValidated: flag(parsed, "mark-validated") });
@@ -440,9 +581,17 @@ async function runState(
     const summary = await store.recovery(identity, repositoryPath);
     const human = [
       `Objective: ${summary.objective}`,
+      `Acceptance criteria: ${summary.acceptanceCriteria}`,
+      `Non-goals: ${summary.nonGoals}`,
+      `Relevant files: ${summary.relevantFiles}`,
+      `Decisions: ${summary.decisions}`,
       `Completed work: ${summary.completedWork}`,
+      `Current work: ${summary.currentWork}`,
       `Current state: ${summary.currentState}`,
-      `Next action: ${summary.nextAction}`,
+      `Current local diff: ${summary.currentLocalDiffSummary}`,
+      `Tests and checks: ${summary.checks}`,
+      `Failures and unresolved questions: ${summary.failuresAndUnresolvedQuestions}`,
+      `Next action: ${summary.exactRecommendedNextStep}`,
       `Blockers: ${summary.blockers}`,
       `Required approval: ${summary.requiredApproval}`,
       `Last successful validation: ${summary.lastSuccessfulValidation}`,
@@ -456,9 +605,9 @@ async function runState(
 async function runInstallerCommand(
   command: "install" | "uninstall",
   parsed: ParsedArguments,
-  context: Required<Pick<CliContext, "env" | "io" | "packageRoot">>,
+  context: Required<Pick<CliContext, "cwd" | "env" | "io" | "packageRoot">>,
 ): Promise<number> {
-  assertAllowedOptions(parsed, ["dry-run", "apply", "confirm-overwrite"]);
+  assertAllowedOptions(parsed, ["dry-run", "apply", "confirm-overwrite", "target", "scope", "project-root"]);
   if (parsed.positionals.length !== 1) {
     throw new StoryStackError(`${command} accepts no positional arguments`, "INVALID_ARGUMENTS");
   }
@@ -467,19 +616,11 @@ async function runInstallerCommand(
   }
   const apply = flag(parsed, "apply");
   const wantsJson = flag(parsed, "json");
-  const userHome = os.homedir();
-  const installerOptions = {
-    packageRoot: context.packageRoot,
-    userHome,
-    storyStackHome: defaultStoryStackHome(context.env),
-    ...(context.env.STORY_STACK_SKILLS_HOME
-      ? { claudeSkillsRoot: path.resolve(context.env.STORY_STACK_SKILLS_HOME) }
-      : {}),
-  };
+  const installerOptions = installerEnvironmentOptions(parsed, context);
   if (command === "install") {
     const confirmation = stringOption(parsed, "confirm-overwrite");
-    if (confirmation !== undefined && confirmation !== "STORY-STACK") {
-      throw new StoryStackError("Overwrite confirmation must be exactly STORY-STACK", "INVALID_ARGUMENTS");
+    if (confirmation !== undefined && confirmation !== "JUSTINSTACK" && confirmation !== "STORY-STACK") {
+      throw new StoryStackError("Overwrite confirmation must be exactly JUSTINSTACK", "INVALID_ARGUMENTS");
     }
     const plan = await planInstall(installerOptions);
     if (!apply) {
@@ -487,8 +628,18 @@ async function runInstallerCommand(
       emit(context.io, wantsJson, { ok: ready, dryRun: true, plan }, formatInstallPlan(plan));
       return ready ? 0 : 1;
     }
-    const result = await applyInstall(plan, { confirmOverwrite: confirmation === "STORY-STACK" });
-    emit(context.io, wantsJson, { ok: true, dryRun: false, result }, `Installed ${result.written.length} files.\nManifest: ${result.manifestPath}`);
+    context.io.stdout(
+      wantsJson
+        ? JSON.stringify({ ok: plan.safetyIssues.length === 0, phase: "preflight", dryRun: false, plan })
+        : formatInstallPlan(plan).replace("(dry-run; no files written)", "(preflight; writing follows)"),
+    );
+    const result = await applyInstall(plan, { confirmOverwrite: confirmation === "JUSTINSTACK" || confirmation === "STORY-STACK" });
+    emit(
+      context.io,
+      wantsJson,
+      { ok: true, dryRun: false, result },
+      `Wrote ${result.written.length} files; removed ${result.removed.length} obsolete files; preserved ${result.preserved.length}; ${result.unchanged.length} unchanged.\nManifest: ${result.manifestPath}\nAgent configuration modified: no`,
+    );
     return 0;
   }
   if (stringOption(parsed, "confirm-overwrite") !== undefined) {
@@ -499,9 +650,53 @@ async function runInstallerCommand(
     emit(context.io, wantsJson, { ok: plan.blocked.length === 0, dryRun: true, plan }, formatUninstallPlan(plan));
     return plan.blocked.length === 0 ? 0 : 1;
   }
+  context.io.stdout(
+    wantsJson
+      ? JSON.stringify({ ok: plan.blocked.length === 0, phase: "preflight", dryRun: false, plan })
+      : formatUninstallPlan(plan).replace("(dry-run; no files removed)", "(preflight; removal follows)"),
+  );
   const result = await applyUninstall(plan);
   emit(context.io, wantsJson, { ok: result.blocked.length === 0, dryRun: false, result }, `Removed ${result.removed.length} files; preserved ${result.blocked.length}.`);
   return result.blocked.length === 0 ? 0 : 1;
+}
+
+async function runSafety(
+  parsed: ParsedArguments,
+  context: Required<Pick<CliContext, "io">>,
+): Promise<number> {
+  assertAllowedOptions(parsed, ["command", "explicitly-requested", "permanent-only"]);
+  const action = parsed.positionals[1];
+  if (parsed.positionals.length !== 2 || (action !== "check" && action !== "hook")) {
+    throw new StoryStackError("Use: justinstack safety check --command <command>, or safety hook", "INVALID_ARGUMENTS");
+  }
+  let command = stringOption(parsed, "command");
+  if (action === "hook") {
+    if (command !== undefined) throw new StoryStackError("safety hook reads JSON from stdin", "INVALID_ARGUMENTS");
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of process.stdin) {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      bytes += buffer.byteLength;
+      if (bytes > 1024 * 1024) throw new StoryStackError("Hook input is too large", "INVALID_ARGUMENTS");
+      chunks.push(buffer);
+    }
+    command = hookCommandFromPayload(Buffer.concat(chunks).toString("utf8")) ?? undefined;
+    if (command === undefined) return 0;
+  }
+  if (!command) throw new StoryStackError("safety check requires --command", "INVALID_ARGUMENTS");
+  const decision = classifyCommand(command);
+  const explicitlyRequested = flag(parsed, "explicitly-requested");
+  const allowed = decision.disposition === "allow" ||
+    (decision.disposition === "require-explicit-request" && (explicitlyRequested || flag(parsed, "permanent-only")));
+  const human = `${allowed ? "ALLOW" : "REFUSE"} [${decision.rule}]: ${decision.reason}`;
+  if (action === "check") {
+    emit(context.io, flag(parsed, "json"), { ok: allowed, command, explicitlyRequested, decision }, human);
+  } else if (!allowed) {
+    context.io.stderr(human);
+  }
+  if (allowed) return 0;
+  if (action === "hook") return 2;
+  return decision.disposition === "deny" ? 3 : 2;
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2), supplied: CliContext = {}): Promise<number> {
@@ -522,6 +717,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2), supp
     if (command === "doctor") return await runDoctor(parsed, context);
     if (command === "state") return await runState(parsed, context);
     if (command === "install" || command === "uninstall") return await runInstallerCommand(command, parsed, context);
+    if (command === "safety") return await runSafety(parsed, context);
     throw new StoryStackError(`Unknown command '${command}'`, "INVALID_ARGUMENTS");
   } catch (error) {
     const storyError = error instanceof StoryStackError ? error : new StoryStackError(errorMessage(error), "UNEXPECTED_ERROR");

@@ -204,7 +204,7 @@ export function normalizeMarkdownBody(body: string): string {
   return `${body.replace(/\r\n?/g, "\n").trim()}\n`;
 }
 
-export function validateMarkdownBody(body: string): string {
+export function validatePrivacySafeMarkdown(body: string): string {
   const normalized = normalizeMarkdownBody(body);
   if (normalized.startsWith("---\n")) {
     throw new StoryStackError("Provide only the Markdown body; YAML frontmatter is engine-owned", "INVALID_CHECKPOINT");
@@ -230,6 +230,11 @@ export function validateMarkdownBody(body: string): string {
   if (Buffer.byteLength(normalized, "utf8") > 128 * 1024) {
     throw new StoryStackError("Checkpoint body exceeds the 128 KiB snapshot limit", "CHECKPOINT_TOO_LARGE");
   }
+  return normalized;
+}
+
+export function validateMarkdownBody(body: string): string {
+  const normalized = validatePrivacySafeMarkdown(body);
   let previousIndex = -1;
   const allowedHeadings = new Set<string>(REQUIRED_SECTIONS);
   const observedHeadings = [...normalized.matchAll(/^## (.+)$/gmu)].map((match) => match[1] ?? "");

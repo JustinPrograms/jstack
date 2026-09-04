@@ -37,6 +37,49 @@ export interface Checkpoint {
   body: string;
 }
 
+export const CONTINUITY_BUNDLE_SCHEMA_VERSION = 1 as const;
+
+export const CONTINUITY_MARKDOWN_FILES = [
+  "context.md",
+  "decisions.md",
+  "progress.md",
+  "checks.md",
+  "handoff.md",
+] as const;
+
+export const CONTINUITY_BUNDLE_FILES = [...CONTINUITY_MARKDOWN_FILES, "state.json"] as const;
+
+export type ContinuityMarkdownFile = (typeof CONTINUITY_MARKDOWN_FILES)[number];
+export type ContinuityBundleFile = (typeof CONTINUITY_BUNDLE_FILES)[number];
+
+export interface ContinuityBundleState {
+  schema_version: typeof CONTINUITY_BUNDLE_SCHEMA_VERSION;
+  workspace_id: string;
+  story_id: string;
+  generation: string;
+  checkpoint_metadata: CheckpointMetadata;
+  files: Record<ContinuityMarkdownFile, string>;
+}
+
+export interface ContinuityBundlePaths {
+  directory: string;
+  lock: string;
+  context: string;
+  decisions: string;
+  progress: string;
+  checks: string;
+  handoff: string;
+  state: string;
+}
+
+export type ContinuityBundleHealthStatus = "current" | "repairable" | "missing-required-information";
+
+export interface ContinuityBundleHealth {
+  status: ContinuityBundleHealthStatus;
+  reasons: string[];
+  files: Partial<Record<ContinuityBundleFile, "current" | "missing" | "different" | "unsafe">>;
+}
+
 export interface GitSnapshot {
   repositoryRoot: string;
   currentBranch: string;
@@ -60,4 +103,5 @@ export interface ReconciliationResult {
   reasons: string[];
   currentSnapshot: GitSnapshot | null;
   validationIsCurrent: boolean;
+  bundleHealth?: ContinuityBundleHealth;
 }

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { StoryStackError } from "../errors.js";
+import type { ContinuityBundlePaths } from "./types.js";
 
 const PROJECT_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const TICKET_PATTERN = /^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,11}$/;
@@ -74,7 +75,36 @@ export function resolveContained(base: string, ...segments: string[]): string {
   throw new StoryStackError("Resolved path escapes the story-stack state root", "PATH_TRAVERSAL");
 }
 
-export function checkpointPath(stateRoot: string, projectSlug: string, ticketKey: string): string {
+export function storyDirectoryPath(workspacesRoot: string, projectSlug: string, ticketKey: string): string {
+  assertProjectSlug(projectSlug);
+  assertTicketKey(ticketKey);
+  return resolveContained(workspacesRoot, projectSlug, "stories", ticketKey);
+}
+
+export function checkpointBundlePaths(
+  workspacesRoot: string,
+  projectSlug: string,
+  ticketKey: string,
+): ContinuityBundlePaths {
+  const directory = storyDirectoryPath(workspacesRoot, projectSlug, ticketKey);
+  const storiesDirectory = path.dirname(directory);
+  return {
+    directory,
+    lock: resolveContained(storiesDirectory, `.${ticketKey}.lock`),
+    context: resolveContained(directory, "context.md"),
+    decisions: resolveContained(directory, "decisions.md"),
+    progress: resolveContained(directory, "progress.md"),
+    checks: resolveContained(directory, "checks.md"),
+    handoff: resolveContained(directory, "handoff.md"),
+    state: resolveContained(directory, "state.json"),
+  };
+}
+
+export function checkpointPath(workspacesRoot: string, projectSlug: string, ticketKey: string): string {
+  return checkpointBundlePaths(workspacesRoot, projectSlug, ticketKey).context;
+}
+
+export function legacyCheckpointPath(stateRoot: string, projectSlug: string, ticketKey: string): string {
   assertProjectSlug(projectSlug);
   assertTicketKey(ticketKey);
   return resolveContained(stateRoot, projectSlug, ticketKey, "context.md");

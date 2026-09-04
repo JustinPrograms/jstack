@@ -1,57 +1,62 @@
 ---
 name: resume-story
-description: Recover an interrupted local story-stack ticket from its checkpoint, validate it against current Git state, and continue from the recorded next action. Use for /resume-story after compaction, usage limits, or a new session.
+description: Recover interrupted JustinStack story work from shared local state, validate it against current Git state, and continue from the exact next action. Use after compaction, usage limits, or a new agent session.
 ---
 
 # Resume Story
 
-Recover the active ticket without replaying completed discovery. The checkpoint is a lead, not ground truth: compare it with the current local repository before acting and preserve every unresolved approval gate.
+Recover the active story without replaying completed discovery. Saved state is a lead, not ground truth: compare it with the current local repository, preserve every unresolved approval gate, and obey the shared execution boundary.
 
-Before acting, read the shared checkpoint protocol. In an installation it is at `~/.story-stack/policies/checkpoint-protocol.md`; in this source project it is at `../../policies/checkpoint-protocol.md` relative to this file. If neither copy is available, stop rather than improvising the state or privacy rules. Resolve the CLI invocation as that policy describes; bare command examples do not imply a global installation.
+Before acting, read the shared checkpoint and safety protocol. In an installation it is at `~/.justin-stack/policies/checkpoint-protocol.md`; in this source project it is at `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither copy is available.
 
-## Find and validate the checkpoint
+## Find and validate the story
 
-1. Resolve the canonical repository root.
-2. Prefer a supplied project slug and ticket key. Otherwise run `story-stack state list --repo <absolute-repository-path> --json` and continue only if exactly one valid checkpoint matches. If selection is ambiguous, show safe candidate identifiers and ask the user to choose.
-3. Read the selected checkpoint with `story-stack state show` before broad repository exploration.
-4. Run `story-stack state validate --project <project-slug> --ticket <ticket-key> --repo <absolute-repository-path> --json`.
-5. Compare recorded and current repository root, branch, HEAD, dirty state, changed-file summary, untracked summary, and worktree fingerprint. Inspect only the local diffs needed to explain discrepancies.
+1. Resolve the canonical local repository root.
+2. Prefer explicit `--workspace <workspace-id> --story <story-id>`. If identity is absent, run `justinstack state list --repo <absolute-repository-path> --json` and continue only when exactly one valid bundle matches. If none or several match, show safe candidate identifiers and ask.
+3. Read the selected bundle with `justinstack state show` before broad repository exploration.
+4. Run `state validate --json` with the same identity and repository arguments.
+5. Treat the result as current, stale but reconcilable, different branch, or missing required information under the shared protocol.
 
-Do not initialize a missing checkpoint during resume. Report missing required information and ask for the intended ticket or suggest `/story` for a new ticket.
+`--project` and `--ticket` are compatibility aliases for the canonical identity flags. Never choose a story from branch text alone.
 
-## Reconcile deliberately
+## Reconcile before continuing
 
-Follow the shared categories:
+- **Current:** trust only claims covered by the validated identity and fingerprint.
+- **Stale but reconcilable:** inspect the local diff and changed paths. Update locally verifiable facts, mark affected checks historical, and refresh state. Do not infer product intent or completion from a file change.
+- **Different branch:** stop. Display the recorded and current branch and ask which context is authoritative. Do not rewrite the bundle.
+- **Missing required information:** stop before the saved next action and ask for the missing identity or context. Do not fabricate it.
 
-- **Current:** the identity and fingerprint agree. Continue from the recorded next action after verifying that it is still unblocked.
-- **Stale but reconcilable:** repository and branch agree and differences are locally observable. Refresh derived facts, correct semantic sections only where evidence supports the correction, and keep uncertain completion or intent as a question.
-- **Different branch:** stop. Show the recorded and active branches and why the mismatch is material. Ask which context to use; do not switch branches or overwrite the checkpoint.
-- **Missing required information:** stop at the missing field, invalid schema, absent repository, or ambiguous identity. Do not manufacture replacement values.
+Use `justinstack state update` when semantic state changes and `state snapshot` when only Git-derived metadata changes. Have only the coordinating agent write, use a complete temporary body, preserve status and approval gates, and remove the temporary file after success or failure. Do not edit `context.md`, projections, or `state.json` directly.
 
-Safe reconciliation may update HEAD, dirty state, changed-file summaries, inspected or changed file lists, and the description of current work when the local diff makes it unambiguous. It may not invent acceptance criteria, plan approval, product decisions, completion claims, review dispositions, or user authorization.
+Avoid writing when validation is current and semantic state is accurate. Validate again after any update.
 
-If relevant files or validation configuration changed after the last successful test, label that result historical and schedule the narrowest appropriate rerun. When relevance cannot be established confidently, treat the validation as stale. Never describe historical validation as current.
+## Display the recovery summary
 
-Write a meaningful reconciliation through `story-stack state update` with a complete temporary body, preserving the current status unless the resumed workflow explicitly requires a supported transition. Always remove the temporary body after success or failure. Use `story-stack state snapshot` when only derived snapshot metadata changed and no semantic section needs correction. Avoid a write when validation reports current and the body remains accurate. Run `story-stack state validate --json` after any update. Resolve the displayed checkpoint path with `story-stack state path`.
+Derive the summary from the validated six-file bundle and current repository. Include:
 
-## Recovery summary
+- objective and acceptance criteria;
+- non-goals and relevant files;
+- decisions already made;
+- completed work and current work;
+- current local diff summary;
+- tests and checks run, clearly marking historical results;
+- failures and unresolved questions;
+- blockers and required approvals; and
+- the exact recommended next step.
 
-Before continuing, display a compact summary with exactly these topics:
+Keep the summary concise enough to act on immediately. Never paste source bodies, full diffs, ticket prose, internal links, names, or verbatim review comments into state or the report.
 
-- **Objective**
-- **Completed work**
-- **Current state**
-- **Next action**
-- **Blockers**
-- **Required approval**
-- **Last successful validation**
+## Continue at the exact next action
 
-Qualify unknown, stale, or historical information visibly. Do not include prohibited checkpoint content or verbose diffs.
+Continue only when validation and the active workflow make the saved next action safe:
 
-## Continue from the next action
+- do not repeat completed discovery merely to rebuild context;
+- inspect only the files needed for the next action;
+- update state after meaningful progress and before lengthy work when practical;
+- preserve scope, non-goals, decisions, review findings, and gates;
+- use current Git evidence instead of historical summaries; and
+- stop before any action the active skill or user request did not authorize.
 
-Resume the recorded exact next action without repeating completed repository discovery. Read only the files needed for that action. Honor the active ticket's mode and all current user constraints: for example, a planning or review next action remains non-editing, while implementation requires prior authority in the conversation and any recorded approvals.
+A request to resume does not authorize source edits, tests, staging, committing, or a remote action by itself. Never push or mutate a pull request, merge request, ticket system, code host, or other remote service. Read-only Git and remote retrieval remain allowed only within the shared protocol.
 
-Before lengthy work, ensure the checkpoint contains a precise recovery point. After meaningful progress, update it using the shared protocol. If the next action is already complete in the current repository, verify that fact, update the snapshot, and advance to the next genuinely pending action rather than performing it again.
-
-Stop and ask when the next action crosses an approval gate, the user's authority is insufficient for the action, or reconciliation requires a product decision. A request to resume does not authorize remote actions, history changes, or source edits that the active workflow did not already permit.
+If the next action crosses an approval gate or requires a product decision, ask before acting. Otherwise perform exactly that next authorized local action, update the bundle through the CLI, validate it, and report the new next action.

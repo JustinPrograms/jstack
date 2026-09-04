@@ -1,132 +1,189 @@
-# story-stack
+# JustinStack
 
-`story-stack` is a local-first Claude Code skill pack for carrying Jira-style engineering work across compaction, usage limits, and new sessions. Version 0.2 includes the Phase 1 planning-to-recovery foundation plus the first Phase 2 vertical slice: an interactive `/plan-eng-review` workflow with an atomic plan-approval gate.
+JustinStack is a local-first skill pack for carrying ticket-shaped engineering work across usage limits, compaction, agent changes, and new sessions. One canonical skill source supports Claude Code, IBM Bob, and OpenAI Codex; a shared checkpoint bundle lets any of them resume the same local work.
 
-This is an original implementation inspired by workflow separation, not a copy of another skill pack. It has no telemetry, analytics, cloud persistence, or network synchronization. The runtime has no third-party dependencies and invokes only local, read-only Git operations.
+The project contains no telemetry, analytics, cloud storage, or network synchronization. It never performs remote mutations. The runtime uses Node.js and local, read-only Git inspection only.
 
-## What is included
+The workflow separation is an original implementation inspired by the public shape of gstack. No gstack setup script or source code is used, and no material code or wording was copied.
 
-- `/story`: explains and plans supplied story text without editing application code.
-- `/plan-eng-review`: challenges scope, architecture, failure handling, tests, and delivery one decision at a time, then finalizes an explicitly approved plan without editing application code.
-- `/review`: reports on a local diff without applying fixes.
-- `/resume-story`: validates and reconciles a saved checkpoint before continuing.
-- A versioned Markdown checkpoint engine with strict metadata, privacy guards, atomic writes, and coordinator-only locking.
-- Content-sensitive local Git snapshots and four-way recovery status: current, stale but reconcilable, different branch, or missing required information.
-- A dry-run-first installer and hash-verified uninstaller.
+## Included workflows
 
-Still planned for later Phase 2 slices, but deliberately not scaffolded here:
+- `/story` turns supplied story text and local repository evidence into a scoped implementation plan. It does not edit application code.
+- `/plan-eng-review` reviews that plan interactively, one material decision at a time, and records an explicit approval gate. It does not edit application code.
+- `/review` reports findings against the ticket, approved plan, repository conventions, and local diff. It is report-only unless fixes are separately requested.
+- `/resume-story` validates the saved state against Git, presents a compact recovery summary, and continues at the exact next action.
 
-- `/implement`: execute an approved plan within its gates.
-- `/verify`: run and record risk-appropriate validation.
-- `/address-review`: apply approved review corrections and re-check them.
-- `/learn`: maintain private, local lessons without mixing them into the generic framework.
+Later Phase 2 slices remain deliberately unscaffolded: `/implement`, `/verify`, `/address-review`, and `/learn`.
+
+Canonical, platform-neutral skill content lives only here:
+
+```text
+skills/<skill-name>/
+  SKILL.md
+  references/          # only when a skill needs supporting material
+```
+
+The `adapters/claude`, `adapters/bob`, and `adapters/codex` modules contain only paths, configuration proposals, and validation reminders. They do not duplicate shared workflow behavior.
+
+## Ticket-first engineering contract
+
+Every installed workflow reads the same shipped protocol before it acts. That protocol requires agents to derive scope from the supplied ticket, search for reusable code, understand the execution path before editing, preserve repository architecture, avoid duplication and speculative abstractions, separate required work from optional findings, use focused acceptance-driven tests, and verify that the final diff is the smallest correct change. The installer copies that canonical policy byte-for-byte into the user's local JustinStack runtime.
 
 ## Requirements and development
 
 - Node.js 20 or newer
-- Git available on `PATH`
+- Git on `PATH`
 
 ```text
 npm install
 npm test
 ```
 
-On Windows systems that block PowerShell script shims, use `npm.cmd install` and `npm.cmd test`. The build output is generated under `dist/` and is intentionally ignored by Git.
-
-Run the development CLI after building:
+On Windows systems that block PowerShell shims, use `npm.cmd install` and `npm.cmd test`. Build and invoke the development CLI with:
 
 ```text
 npm run build
-node dist/src/cli.js doctor
 node dist/src/cli.js help
+node dist/src/cli.js doctor --target all --scope project
 ```
 
-The test suite uses Node's built-in test runner and disposable local Git repositories. It never configures a remote and never changes the current repository's index or history.
+`story-stack` remains a deprecated executable and npm-script alias for Phase 1 compatibility. `justinstack` is canonical.
 
-## Checkpoint model
+## Shared continuity
 
-Each ticket is stored at:
+Every story has one six-file bundle:
 
 ```text
-~/.story-stack/state/<project-slug>/<ticket-key>/context.md
+~/.justin-stack/workspaces/<workspace-id>/stories/<story-id>/
+  context.md
+  decisions.md
+  progress.md
+  checks.md
+  handoff.md
+  state.json
 ```
 
-The YAML frontmatter is engine-owned. It records schema and ticket identity, the canonical repository path, current and base branches, HEAD, dirty state, bounded changed-file summaries, untracked counts, timestamps, the worktree fingerprint, and validation freshness. The Markdown body is a concise current snapshot with objective, criteria, plan, progress, decisions, tests, review state, blockers, and approval gates.
+`context.md` is the canonical snapshot: strict YAML metadata plus the established Markdown sections for objective, acceptance criteria, non-goals, plan, progress, files, decisions, assumptions, checks, reviews, blockers, and approvals. The engine deterministically projects the other Markdown views and writes `state.json` last with content hashes. Projection drift is detectable and repairable; it never silently becomes canonical.
 
-The fingerprint hashes branch and HEAD data, raw Git status, staged and unstaged binary diffs, and the contents of untracked files. Only the digest is saved; diffs and file contents are never put in the checkpoint. Untracked filenames are omitted by default and represented by a count.
+Metadata records the repository root, branch, base branch, HEAD, dirty state, bounded changed-file information, timestamps, ticket status, and a content-sensitive worktree fingerprint. File contents and diffs are never stored. A successful historical check is marked stale whenever the relevant Git fingerprint changes.
 
-Checkpoint updates use a same-directory temporary file, file flush, atomic rename, compare-and-swap check, and a coordinator lock. A lock older than 30 minutes is removed only when its recorded process can be proven absent. An unchanged body and repository snapshot do not rewrite the file or advance `updated_at`.
+Writes use same-directory temporary files, flushes, atomic renames, compare-and-swap checks, path containment, final-file link checks, and a per-story coordinator lock. Only the coordinating agent may update the canonical bundle.
 
-## CLI usage
+The primary environment override is `JUSTINSTACK_HOME`; `JUSTIN_STACK_HOME` and `STORY_STACK_HOME` remain compatibility aliases. Legacy discovery stays rooted at `~/.story-stack/state` even when a new-home override is used, so moving the runtime cannot hide Phase 1 state. For a non-default legacy location, set `STORY_STACK_HOME` to that old home and `JUSTINSTACK_HOME` to the new home; the new override wins for current bundles while the compatibility value identifies legacy state.
 
-Identifiers reject path syntax before normalization. Project labels normalize to lowercase kebab-case; Jira-style ticket keys normalize to uppercase.
+A validated legacy checkpoint can be copied into the new bundle without deleting its source. First list state for the active repository, then migrate the identified story:
 
 ```text
-story-stack doctor
-story-stack state init --project sample-app --ticket DEMO-101 --repo . --base-branch main --objective "Add a local preference"
-story-stack state path --project sample-app --ticket DEMO-101 --repo .
-story-stack state show --project sample-app --ticket DEMO-101 --repo .
-story-stack state validate --project sample-app --ticket DEMO-101 --repo .
-story-stack state snapshot --project sample-app --ticket DEMO-101 --repo .
-story-stack state recovery --project sample-app --ticket DEMO-101 --repo .
-story-stack state approve-plan --project sample-app --ticket DEMO-101 --repo . --body-file <reviewed-body.md> --confirm-user-approved
-story-stack state complete --project sample-app --ticket DEMO-101 --repo .
+justinstack state list --repo .
+justinstack state migrate --workspace sample-app --story DEMO-101 --repo .
 ```
 
-`state path` returns the intended safe path when an explicit identity is supplied, even before a checkpoint exists. Other state commands require an existing checkpoint. When project and ticket are omitted, the CLI selects only if exactly one valid checkpoint matches the canonical repository; it never guesses among multiple tickets.
+`state list` labels each result as `bundle` or `legacy`. The identity flags may be omitted from `state migrate` only when exactly one valid legacy checkpoint matches the repository. Migration retains the old `context.md`, is idempotent when both copies match, and refuses to choose between divergent old and new checkpoints.
 
-Claude supplies meaningful Markdown through the engine rather than directly editing `context.md`:
+### State commands
 
 ```text
-story-stack state update --project sample-app --ticket DEMO-101 --repo . --body-file <temporary-body.md>
-story-stack state update --project sample-app --ticket DEMO-101 --repo . --section "Exact next action" --body-file <temporary-section.md>
+justinstack state init --workspace sample-app --story DEMO-101 --repo . --base-branch main --objective "Add a local preference"
+justinstack state path --workspace sample-app --story DEMO-101 --repo .
+justinstack state show --workspace sample-app --story DEMO-101 --repo .
+justinstack state validate --workspace sample-app --story DEMO-101 --repo .
+justinstack state snapshot --workspace sample-app --story DEMO-101 --repo .
+justinstack state recovery --workspace sample-app --story DEMO-101 --repo .
+justinstack state approve-plan --workspace sample-app --story DEMO-101 --repo . --body-file reviewed-body.md --confirm-user-approved
+justinstack state complete --workspace sample-app --story DEMO-101 --repo .
 ```
 
-Changing `Required user approvals` needs `--allow-approval-change`. Use `--mark-validated` only in the same update that records a successful validation summary for the current repository fingerprint, or on a snapshot whose existing validation section already records that success. Completion requires current validation, an `in-review` status, recorded acceptance criteria and plan, and no pending feedback, blockers, or approvals.
+`--project` and `--ticket` remain aliases for `--workspace` and `--story`. If identity flags are omitted, JustinStack selects a checkpoint only when exactly one valid story matches the canonical repository. Status code 0 means current, 2 stale but reconcilable, 3 different branch, and 4 missing required information.
 
-`state approve-plan` is intentionally narrower than a normal update. It accepts a complete checkpoint body only after the coordinating agent has received explicit approval for the reviewed plan. It refuses stale or cross-branch state, incomplete objectives or criteria, unresolved blockers, draft plan text, and any removal or replacement of existing approval gates. Success moves an eligible ticket to `ready`; it does not authorize implementation by itself.
-
-The `/plan-eng-review` flow is interactive for material choices. It first challenges scope and reuse, then reviews architecture, correctness, test coverage, and delivery risks. Each unresolved issue is presented separately with evidence, impact, an opinionated recommendation, and concrete tradeoffs. Accepted decisions are saved as a concise current snapshot so a later session can resume at the next open decision without replaying the review.
-
-All read and mutation commands support `--json`. `state validate` and `state recovery` return exit code 0 for current, 2 for stale but reconcilable, 3 for a branch mismatch, and 4 for missing required information.
+Agents supply concise Markdown through `state update`; they do not edit the bundle directly. Changing `Required user approvals` requires `--allow-approval-change`. Marking validation current requires a successful check summary tied to the current fingerprint.
 
 ## Installation
 
-Build first, then inspect the install plan. Installation is a dry run unless `--apply` is present.
+Installation is always a dry run unless `--apply` is explicit. Project scope uses the current project root; global scope uses the user's home directory.
 
 ```text
 npm run build
-node dist/src/cli.js install --dry-run
-node dist/src/cli.js install --apply
+
+justinstack install --target claude --scope project
+justinstack install --target bob --scope project
+justinstack install --target codex --scope project
+justinstack install --target all --scope global
+
+# Write only after reviewing every operation and proposal:
+justinstack install --target all --scope project --apply
 ```
 
-The plan lists every absolute target. Runtime, policy, launcher, manifest, and private state live below `~/.story-stack/`; only the four implemented skill files are placed below `~/.claude/skills/`. The installer does not change `PATH`, shell profiles, Git configuration, Claude settings, or hooks. It uses no symlinks and needs no administrator access.
+Skill destinations are:
 
-Any existing target is a collision, including an identical file. Apply refuses all collisions before writing anything. An intentional replacement additionally requires the literal confirmation option shown by the collision report; uninstalling the prior manifest first is safer.
+| Target | Project | Global |
+| --- | --- | --- |
+| Claude Code | `.claude/skills/` | `~/.claude/skills/` |
+| IBM Bob | `.bob/skills/` | `~/.bob/skills/` |
+| OpenAI Codex | `.codex/skills/` | `~/.codex/skills/` |
 
-The installed portable invocation is:
+The plan prints every absolute target operation. A byte-identical file is `UNCHANGED` and is not rewritten; if it predates the manifest, it is also left unowned so uninstall cannot later claim and remove it. A different unmanaged regular file is shown with a bounded, secret-redacted, terminal-safe diff and cannot be replaced without both `--apply` and `--confirm-overwrite JUSTINSTACK`. Directories, links, unsafe parents, and invalid manifests are refused. Replaced or removed managed files receive a durable local backup under `~/.justin-stack/backups/` before mutation; each backup appears in preflight with its exact source and destination. The aggregate manifest records each target's actual destination root and independent target/scope ownership, so sequential installs and custom-root uninstalls do not guess paths. Local install and uninstall operations share an exclusive lock to prevent lost manifest updates.
+
+When an upgrade removes a canonical file, an unchanged installer-owned copy is shown as `REMOVE`; a locally modified copy is `PRESERVE`, remains manifest-owned, and is reported as obsolete by `doctor`. The installer never deletes an obsolete file merely because its name disappeared from the new package.
+
+Even with `--apply`, the CLI emits the complete preflight plan before the first write. In JSON apply mode it emits two newline-delimited records: the preflight record, then the result record.
+
+The installer also creates portable `justinstack` and legacy `story-stack` launchers below `~/.justin-stack/bin/`. It does not alter `PATH`; add that directory manually if wanted. No administrator permission, Bash, symlink support, Docker, or global package is required.
+
+Uninstall remains dry-run-first and removes only manifest-owned files whose hashes still match:
 
 ```text
-node <absolute-home-path>/.story-stack/bin/story-stack.js doctor
+justinstack uninstall --target bob --scope project
+justinstack uninstall --target bob --scope project --apply
 ```
 
-The installer also creates an extensionless executable launcher for macOS/Linux and a `.cmd` launcher for Windows. Add the bin directory to `PATH` manually only if desired.
+Modified files and all story state are preserved.
 
-Uninstall is also a dry run by default:
+## Platform notes and configuration proposals
+
+Run doctor for one platform or all platforms:
 
 ```text
-node dist/src/cli.js uninstall --dry-run
-node dist/src/cli.js uninstall --apply
+justinstack doctor --target claude --scope global
+justinstack doctor --target bob --scope project
+justinstack doctor --target codex --scope project
+justinstack doctor --target all --scope project
 ```
 
-Uninstall reads the generated manifest and removes only allowlisted files whose hashes still match. Modified or unlisted files, all ticket state, and non-empty directories are preserved. A partial refusal keeps the manifest for inspection and retry.
+Doctor is read-only. It checks canonical skill hashes, reports stale or obsolete managed files, and prints adapter reminders plus proposal-only paths.
 
-## Privacy and operational limits
+- Claude Code: the adapter proposes additions to `CLAUDE.md`, permissions, and pre-tool hooks. The installer never edits them. Claude's own documentation notes that skill `allowed-tools` grants access; it is not a universal restriction mechanism.
+- IBM Bob: skills require Advanced mode in the documented skills workflow. Doctor reminds the user to verify discovery with `/list-skills`. Bob rule and lifecycle-hook ideas are proposals only because supported schemas and modes can vary by installed version.
+- OpenAI Codex: JustinStack installs to the requested `.codex/skills` directory. Current public Codex documentation advertises `.agents/skills` for skill discovery, so doctor explicitly asks the user to verify whether their Codex version discovers `.codex/skills`. The adapter separately proposes `AGENTS.md` and Codex-local rule guidance without modifying either.
 
-Checkpoint validation blocks URLs, fenced source bodies, several high-confidence credential patterns, oversized bodies, malformed metadata, and missing or reordered sections. It cannot reliably recognize every personal name, proprietary phrase, or secret format, so the skills also require paraphrasing and local review of checkpoint content.
+Public references used by the adapters: [Claude Code skills](https://code.claude.com/docs/en/skills), [Claude Code hooks](https://code.claude.com/docs/en/hooks), [IBM Bob skills](https://bob.ibm.com/docs/ide/features/skills), [IBM Bob lifecycle hooks](https://bob.ibm.com/docs/ide/configuration/lifecycle-hooks), [Codex skills](https://developers.openai.com/codex/skills), and [Codex rules](https://learn.chatgpt.com/docs/agent-configuration/rules).
 
-Phase 1 fingerprints the outer Git worktree. Repeated content changes to tracked and ordinary untracked files are detected, but changes made concurrently during the narrow snapshot window can still race, and further edits inside an already-dirty nested submodule may not change the outer fingerprint. Non-UTF-8 Git filenames on Unix are not represented losslessly in human summaries. Branch comparisons use local refs only; no remote refresh is attempted.
+Configuration files are never modified by `install --apply`, so unrelated configuration is preserved byte-for-byte and no configuration backup is needed. A future configuration-writing command must show a merged diff and create a durable pre-image backup before any write.
 
-Installation and replacement must be run from a built source checkout; the installed runtime is not a self-updater. Its launcher can operate checkpoints and perform manifest-based uninstall, but it does not retain a second copy of the skill sources for reinstalling itself.
+## Permanent safety contract
 
-The installer is intentionally not run by the test suite against the real home directory. Tests use isolated temporary targets, and normal development never stages, commits, or publishes project changes.
+All canonical skills instruct every supported agent to:
+
+- never run `git push`;
+- never create, submit, update, approve, close, comment on, or merge a PR/MR;
+- never mutate Jira, GitHub, GitLab, or another remote service;
+- never stage or commit unless explicitly requested in the current conversation;
+- allow read-only local Git and remote retrieval;
+- make local edits and run tests only when requested; and
+- stop locally so the user handles remote actions.
+
+Adapters propose platform-specific rules or hooks as defense in depth, but never apply them. The local classifier can be tested without executing a command:
+
+```text
+justinstack safety check --command "git status --short"
+justinstack safety check --command "git push origin feature"
+```
+
+This classifier is intentionally conservative and cannot perfectly parse every shell, alias, wrapper, or future platform command. Skill instructions and user authorization remain authoritative.
+
+## Privacy and limitations
+
+Checkpoint validation rejects URLs, fenced source bodies, several high-confidence credential patterns, oversized content, malformed metadata, and missing or reordered sections. It cannot identify every name, secret format, or proprietary phrase, so agents must paraphrase and users should inspect checkpoint text before sharing it.
+
+Git fingerprints detect staged, unstaged, and ordinary untracked content without saving those contents. A narrow concurrent-change race remains possible, nested submodule changes can be less precise, and non-UTF-8 filenames may not render losslessly. Branch checks use local refs. Read-only remote retrieval is allowed by policy but never performed automatically by the checkpoint engine or installer.
+
+The test suite uses disposable local directories and repositories, including paths with spaces. It never configures a remote or changes this repository's index or history. Real installation is not run during development tests.

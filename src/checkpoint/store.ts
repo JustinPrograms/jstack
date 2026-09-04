@@ -1,14 +1,25 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdir, open, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { access, mkdir, open, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { StoryStackError } from "../errors.js";
-import { writeFileAtomic } from "./atomic.js";
-import { assertSafeWritePath } from "./filesystem.js";
+import {
+  inspectContinuityBundle,
+  publishInitialContinuityBundle,
+  renderContinuityBundle,
+  writeBundleFileIfDifferent,
+} from "./bundle.js";
+import { assertSafeWritePath, readRegularFileOrNull } from "./filesystem.js";
 import { metadataEqualsExceptUpdatedAt, parseCheckpoint, serializeCheckpoint } from "./frontmatter.js";
 import { captureGitSnapshot, detectBaseBranch, findRepositoryRoot, validateBaseBranch } from "./git.js";
-import { checkpointPath, sanitizeProjectSlug, sanitizeTicketKey } from "./identifiers.js";
+import {
+  checkpointBundlePaths,
+  checkpointPath,
+  legacyCheckpointPath,
+  sanitizeProjectSlug,
+  sanitizeTicketKey,
+} from "./identifiers.js";
 import { reconcileCheckpoint } from "./reconcile.js";
 import { extractSection, REQUIRED_SECTIONS, validateMarkdownBody } from "./schema.js";
 import { loadCheckpointTemplate, replaceSection } from "./template.js";
@@ -17,13 +28,22 @@ import {
   TICKET_STATUSES,
   type Checkpoint,
   type CheckpointMetadata,
+  type ContinuityBundleHealth,
+  type ContinuityBundlePaths,
   type GitSnapshot,
   type ReconciliationResult,
   type TicketStatus,
 } from "./types.js";
 
 export interface StoreOptions {
+  justinStackHome?: string;
+  /** @deprecated Use justinStackHome. */
+  storyStackHome?: string;
+  workspacesRoot?: string;
+  /** Legacy single-checkpoint root retained for explicit migration helpers. */
   stateRoot?: string;
+  /** Legacy root when it is independent from the new JustinStack home. */
+  legacyStateRoot?: string;
   packageRoot?: string;
   clock?: () => Date;
 }
@@ -43,6 +63,7 @@ export interface MutationResult {
   checkpoint: Checkpoint;
   checkpointPath: string;
   changed: boolean;
+  repairedFiles?: string[];
 }
 
 export interface UpdateCheckpointOptions extends CheckpointIdentity {
@@ -66,11 +87,24 @@ export interface ListedCheckpoint {
 }
 
 export interface RecoverySummary {
+  workspace: string;
+  story: string;
   project: string;
   ticket: string;
   objective: string;
+  acceptanceCriteria: string;
+  nonGoals: string;
+  relevantFiles: string;
+  decisions: string;
   completedWork: string;
+  currentWork: string;
   currentState: string;
+  currentLocalDiffSummary: string;
+  checks: string;
+  failures: string;
+  unresolvedQuestions: string;
+  failuresAndUnresolvedQuestions: string;
+  exactRecommendedNextStep: string;
   nextAction: string;
   blockers: string;
   requiredApproval: string;
@@ -78,10 +112,11 @@ export interface RecoverySummary {
   reconciliation: ReconciliationResult;
 }
 
-export function defaultStoryStackHome(environment: NodeJS.ProcessEnv = process.env): string {
-  const override = environment.STORY_STACK_HOME;
-  const candidate = override && override.length > 0 ? override : path.join(os.homedir(), ".story-stack");
-  if (candidate.includes("\0")) throw new StoryStackError("Story-stack home contains an invalid NUL byte", "INVALID_STORY_HOME");
+export function defaultJustinStackHome(environment: NodeJS.ProcessEnv = process.env): string {
+  const override = [environment.JUSTINSTACK_HOME, environment.JUSTIN_STACK_HOME, environment.STORY_STACK_HOME]
+    .find((candidate) => candidate !== undefined && candidate.length > 0);
+  const candidate = override && override.length > 0 ? override : path.join(os.homedir(), ".justin-stack");
+  if (candidate.includes("\0")) throw new StoryStackError("JustinStack home contains an invalid NUL byte", "INVALID_STORY_HOME");
   const resolved = path.resolve(candidate);
   if (resolved === path.parse(resolved).root) {
     throw new StoryStackError("Story-stack home cannot be a filesystem root", "INVALID_STORY_HOME");
@@ -89,22 +124,22 @@ export function defaultStoryStackHome(environment: NodeJS.ProcessEnv = process.e
   return resolved;
 }
 
+/** @deprecated Use defaultJustinStackHome. */
+export const defaultStoryStackHome = defaultJustinStackHome;
+
+export function defaultLegacyStateRoot(environment: NodeJS.ProcessEnv = process.env): string {
+  const explicitLegacy = environment.STORY_STACK_HOME;
+  if (explicitLegacy && explicitLegacy.length > 0) return path.join(path.resolve(explicitLegacy), "state");
+  // New-home overrides must not hide checkpoints written by Phase 1. The old
+  // default remains independent unless its own compatibility override is set.
+  return path.join(os.homedir(), ".story-stack", "state");
+}
+
 function digest(source: string): string {
   return createHash("sha256").update(source).digest("hex");
 }
 
-async function readFileOrNull(filePath: string): Promise<string | null> {
-  try {
-    const stats = await lstat(filePath);
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      throw new StoryStackError(`State path must be a regular file, not a link or directory: ${filePath}`, "UNSAFE_STATE_FILE");
-    }
-    return await readFile(filePath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
+const readFileOrNull = readRegularFileOrNull;
 
 function metadataFromSnapshot(
   existing: CheckpointMetadata,
@@ -153,6 +188,55 @@ function isPlaceholder(section: string): boolean {
     .replace(/[.`]/g, "")
     .trim();
   return normalized === "not recorded" || normalized === "nothing completed yet" || normalized.length === 0;
+}
+
+function combineRecoverySections(parts: readonly { label: string; value: string }[]): string {
+  return parts.map((part) => `${part.label}:\n${part.value}`).join("\n\n");
+}
+
+function currentDiffSummary(snapshot: GitSnapshot): string {
+  if (!snapshot.dirty) return "Clean worktree.";
+  const lines = [
+    `Changed-file count: ${snapshot.changedFileCount}.`,
+    `Untracked-file count: ${snapshot.untrackedFileCount}.`,
+  ];
+  if (snapshot.changedFiles.length > 0) {
+    lines.push("Changed files:", ...snapshot.changedFiles.map((entry) => `- ${entry}`));
+  }
+  return lines.join("\n");
+}
+
+function recordedFailures(validationSummary: string): string {
+  const failures = validationSummary
+    .split("\n")
+    .filter((line) => /^\s*(?:[-*]\s*)?(?:fail(?:ed|ing|ure)?|error|interrupted|blocked)\b/iu.test(line));
+  return failures.length > 0 ? failures.join("\n") : "None explicitly recorded.";
+}
+
+function includeBundleHealth(
+  reconciliation: ReconciliationResult,
+  bundleHealth: ContinuityBundleHealth,
+): ReconciliationResult {
+  const reasons = [...reconciliation.reasons, ...bundleHealth.reasons];
+  if (bundleHealth.status === "missing-required-information" && reconciliation.status !== "different-branch") {
+    return {
+      status: "missing-required-information",
+      reasons,
+      currentSnapshot: reconciliation.currentSnapshot,
+      validationIsCurrent: reconciliation.validationIsCurrent,
+      bundleHealth,
+    };
+  }
+  if (reconciliation.status === "current" && bundleHealth.status === "repairable") {
+    return {
+      status: "stale-but-reconcilable",
+      reasons,
+      currentSnapshot: reconciliation.currentSnapshot,
+      validationIsCurrent: reconciliation.validationIsCurrent,
+      bundleHealth,
+    };
+  }
+  return { ...reconciliation, reasons, bundleHealth };
 }
 
 function assertSuccessfulValidationSection(body: string): void {
@@ -244,23 +328,57 @@ function assertStatusTransition(from: TicketStatus, to: TicketStatus): void {
 }
 
 export class CheckpointStore {
+  readonly justinStackHome: string;
+  /** @deprecated Use justinStackHome. */
   readonly storyStackHome: string;
+  readonly workspacesRoot: string;
+  /** Legacy `.story-stack/state`-style root; used only by migration helpers. */
   readonly stateRoot: string;
   readonly packageRoot: string | undefined;
   readonly clock: () => Date;
 
   constructor(options: StoreOptions = {}) {
-    this.stateRoot = path.resolve(options.stateRoot ?? path.join(defaultStoryStackHome(), "state"));
-    if (this.stateRoot === path.parse(this.stateRoot).root) {
+    const inferredHome = options.stateRoot !== undefined
+      ? path.dirname(path.resolve(options.stateRoot))
+      : options.workspacesRoot !== undefined
+        ? path.dirname(path.resolve(options.workspacesRoot))
+        : undefined;
+    this.justinStackHome = path.resolve(
+      options.justinStackHome ?? options.storyStackHome ?? inferredHome ?? defaultJustinStackHome(),
+    );
+    this.storyStackHome = this.justinStackHome;
+    this.stateRoot = path.resolve(
+      options.legacyStateRoot ??
+      options.stateRoot ??
+      // `storyStackHome` is the deprecated Phase 1 home override, so retain
+      // its old `state/` location. A new JustinStack/workspace override alone
+      // must not redirect legacy discovery away from ~/.story-stack/state.
+      (options.storyStackHome === undefined
+        ? defaultLegacyStateRoot()
+        : path.join(path.resolve(options.storyStackHome), "state")),
+    );
+    this.workspacesRoot = path.resolve(options.workspacesRoot ?? path.join(this.storyStackHome, "workspaces"));
+    if (
+      this.storyStackHome === path.parse(this.storyStackHome).root ||
+      this.stateRoot === path.parse(this.stateRoot).root ||
+      this.workspacesRoot === path.parse(this.workspacesRoot).root
+    ) {
       throw new StoryStackError("Checkpoint state root cannot be a filesystem root", "INVALID_STORY_HOME");
     }
-    this.storyStackHome = path.dirname(this.stateRoot);
     this.packageRoot = options.packageRoot;
     this.clock = options.clock ?? (() => new Date());
   }
 
   pathFor(identity: CheckpointIdentity): string {
-    return checkpointPath(this.stateRoot, identity.projectSlug, identity.ticketKey);
+    return checkpointPath(this.workspacesRoot, identity.projectSlug, identity.ticketKey);
+  }
+
+  bundlePathsFor(identity: CheckpointIdentity): ContinuityBundlePaths {
+    return checkpointBundlePaths(this.workspacesRoot, identity.projectSlug, identity.ticketKey);
+  }
+
+  legacyPathFor(identity: CheckpointIdentity): string {
+    return legacyCheckpointPath(this.stateRoot, identity.projectSlug, identity.ticketKey);
   }
 
   normalizeIdentity(projectInput: string, ticketInput: string): CheckpointIdentity {
@@ -277,9 +395,48 @@ export class CheckpointStore {
     return parseCheckpoint(source);
   }
 
+  async loadLegacy(identity: CheckpointIdentity): Promise<Checkpoint> {
+    const filePath = this.legacyPathFor(identity);
+    const source = await readFileOrNull(filePath);
+    if (source === null) throw new StoryStackError(`Legacy checkpoint not found: ${filePath}`, "CHECKPOINT_NOT_FOUND", 4);
+    const checkpoint = parseCheckpoint(source);
+    if (
+      checkpoint.metadata.project_slug !== identity.projectSlug ||
+      checkpoint.metadata.ticket_key !== identity.ticketKey
+    ) {
+      throw new StoryStackError("Legacy checkpoint identity does not match its state directory", "INVALID_CHECKPOINT", 4);
+    }
+    return checkpoint;
+  }
+
+  async bundleHealth(identity: CheckpointIdentity): Promise<ContinuityBundleHealth> {
+    return inspectContinuityBundle(this.bundlePathsFor(identity), await this.load(identity));
+  }
+
+  /** Copy a validated legacy checkpoint into the bundle layout without removing the source. */
+  async migrateLegacy(identity: CheckpointIdentity): Promise<MutationResult> {
+    const legacy = await this.loadLegacy(identity);
+    const targetPath = this.pathFor(identity);
+    const targetSource = await readFileOrNull(targetPath);
+    if (targetSource !== null) {
+      const current = parseCheckpoint(targetSource);
+      if (serializeCheckpoint(current) !== serializeCheckpoint(legacy)) {
+        throw new StoryStackError(
+          "Legacy and continuity checkpoints differ; refusing to choose one automatically",
+          "CHECKPOINT_CONFLICT",
+          4,
+        );
+      }
+      const repairedFiles = await this.repairBundle(current, targetSource);
+      return { checkpoint: current, checkpointPath: targetPath, changed: false, repairedFiles };
+    }
+    await this.writeWithCompareAndSwap(identity, legacy, null);
+    return { checkpoint: legacy, checkpointPath: targetPath, changed: true };
+  }
+
   async create(options: CreateCheckpointOptions): Promise<MutationResult> {
     const filePath = this.pathFor(options);
-    await assertSafeWritePath(this.stateRoot, filePath);
+    await assertSafeWritePath(this.workspacesRoot, filePath);
     const existingSource = await readFileOrNull(filePath);
     if (existingSource !== null) {
       const existing = parseCheckpoint(existingSource);
@@ -298,7 +455,8 @@ export class CheckpointStore {
           4,
         );
       }
-      return { checkpoint: existing, checkpointPath: filePath, changed: false };
+      const repairedFiles = await this.repairBundle(existing, existingSource);
+      return { checkpoint: existing, checkpointPath: filePath, changed: false, repairedFiles };
     }
     const snapshot = await captureGitSnapshot(options.repositoryPath);
     const now = this.clock().toISOString();
@@ -329,7 +487,7 @@ export class CheckpointStore {
       },
       body,
     };
-    await this.writeWithCompareAndSwap(filePath, checkpoint, null);
+    await this.writeWithCompareAndSwap(options, checkpoint, null);
     return { checkpoint, checkpointPath: filePath, changed: true };
   }
 
@@ -340,7 +498,7 @@ export class CheckpointStore {
     } catch (error) {
       if (
         error instanceof StoryStackError &&
-        ["INVALID_CHECKPOINT", "UNSUPPORTED_SCHEMA", "CHECKPOINT_NOT_FOUND"].includes(error.code)
+        ["INVALID_CHECKPOINT", "UNSUPPORTED_SCHEMA", "CHECKPOINT_NOT_FOUND", "UNSAFE_STATE_FILE"].includes(error.code)
       ) {
         return {
           status: "missing-required-information",
@@ -352,7 +510,9 @@ export class CheckpointStore {
       throw error;
     }
     const snapshot = await captureGitSnapshot(repositoryPath);
-    return reconcileCheckpoint(checkpoint.metadata, snapshot);
+    const reconciliation = reconcileCheckpoint(checkpoint.metadata, snapshot);
+    const bundleHealth = await this.bundleHealth(identity);
+    return includeBundleHealth(reconciliation, bundleHealth);
   }
 
   async snapshot(
@@ -380,9 +540,10 @@ export class CheckpointStore {
       body: original.body,
     };
     if (metadataEqualsExceptUpdatedAt(original.metadata, candidate.metadata)) {
-      return { checkpoint: original, checkpointPath: filePath, changed: false };
+      const repairedFiles = await this.repairBundle(original, originalSource);
+      return { checkpoint: original, checkpointPath: filePath, changed: false, repairedFiles };
     }
-    await this.writeWithCompareAndSwap(filePath, candidate, originalSource);
+    await this.writeWithCompareAndSwap(identity, candidate, originalSource);
     return { checkpoint: candidate, checkpointPath: filePath, changed: true };
   }
 
@@ -414,9 +575,10 @@ export class CheckpointStore {
     });
     const candidate = { metadata, body };
     if (metadataEqualsExceptUpdatedAt(original.metadata, metadata) && original.body === body) {
-      return { checkpoint: original, checkpointPath: filePath, changed: false };
+      const repairedFiles = await this.repairBundle(original, originalSource);
+      return { checkpoint: original, checkpointPath: filePath, changed: false, repairedFiles };
     }
-    await this.writeWithCompareAndSwap(filePath, candidate, originalSource);
+    await this.writeWithCompareAndSwap(options, candidate, originalSource);
     return { checkpoint: candidate, checkpointPath: filePath, changed: true };
   }
 
@@ -464,9 +626,10 @@ export class CheckpointStore {
     const metadata = metadataFromSnapshot(original.metadata, snapshot, now, { status: "ready" });
     const candidate: Checkpoint = { metadata, body };
     if (metadataEqualsExceptUpdatedAt(original.metadata, metadata) && original.body === body) {
-      return { checkpoint: original, checkpointPath: filePath, changed: false };
+      const repairedFiles = await this.repairBundle(original, originalSource);
+      return { checkpoint: original, checkpointPath: filePath, changed: false, repairedFiles };
     }
-    await this.writeWithCompareAndSwap(filePath, candidate, originalSource);
+    await this.writeWithCompareAndSwap(options, candidate, originalSource);
     return { checkpoint: candidate, checkpointPath: filePath, changed: true };
   }
 
@@ -503,33 +666,67 @@ export class CheckpointStore {
       throw new StoryStackError("Pending review feedback remains recorded", "PENDING_REVIEW_FEEDBACK");
     }
     if (original.metadata.ticket_status === "completed") {
-      return { checkpoint: original, checkpointPath: filePath, changed: false };
+      const repairedFiles = await this.repairBundle(original, originalSource);
+      return { checkpoint: original, checkpointPath: filePath, changed: false, repairedFiles };
     }
     const now = this.clock().toISOString();
     const candidate: Checkpoint = {
       metadata: metadataFromSnapshot(original.metadata, snapshot, now, { status: "completed" }),
       body: original.body,
     };
-    await this.writeWithCompareAndSwap(filePath, candidate, originalSource);
+    await this.writeWithCompareAndSwap(identity, candidate, originalSource);
     return { checkpoint: candidate, checkpointPath: filePath, changed: true };
   }
 
   async recovery(identity: CheckpointIdentity, repositoryPath: string): Promise<RecoverySummary> {
     const checkpoint = await this.load(identity);
-    const reconciliation = reconcileCheckpoint(checkpoint.metadata, await captureGitSnapshot(repositoryPath));
+    const snapshot = await captureGitSnapshot(repositoryPath);
+    const reconciliation = includeBundleHealth(
+      reconcileCheckpoint(checkpoint.metadata, snapshot),
+      await inspectContinuityBundle(this.bundlePathsFor(identity), checkpoint),
+    );
     const validationSummary = extractSection(checkpoint.body, "Test and validation results");
     const validation = checkpoint.metadata.last_validation_at
       ? `${checkpoint.metadata.last_validation_at} (${reconciliation.validationIsCurrent ? "current" : "historical; repository state changed"}) - ${validationSummary}`
       : "None recorded.";
     const dirty = reconciliation.currentSnapshot?.dirty ? "dirty" : "clean";
+    const objective = extractSection(checkpoint.body, "Objective");
+    const completedWork = extractSection(checkpoint.body, "Completed work");
+    const currentWork = extractSection(checkpoint.body, "Current work");
+    const nextAction = extractSection(checkpoint.body, "Exact next action");
+    const blockers = extractSection(checkpoint.body, "Blockers and questions");
+    const unresolvedQuestions = combineRecoverySections([
+      { label: "Blockers and questions", value: blockers },
+      { label: "Pending review feedback", value: extractSection(checkpoint.body, "Pending review feedback") },
+    ]);
+    const failures = recordedFailures(validationSummary);
     return {
+      workspace: checkpoint.metadata.project_slug,
+      story: checkpoint.metadata.ticket_key,
       project: checkpoint.metadata.project_slug,
       ticket: checkpoint.metadata.ticket_key,
-      objective: extractSection(checkpoint.body, "Objective"),
-      completedWork: extractSection(checkpoint.body, "Completed work"),
+      objective,
+      acceptanceCriteria: extractSection(checkpoint.body, "Acceptance criteria"),
+      nonGoals: extractSection(checkpoint.body, "Non-goals"),
+      relevantFiles: combineRecoverySections([
+        { label: "Files inspected", value: extractSection(checkpoint.body, "Files inspected") },
+        { label: "Files changed and why", value: extractSection(checkpoint.body, "Files changed and why") },
+      ]),
+      decisions: extractSection(checkpoint.body, "Decisions and rationale"),
+      completedWork,
+      currentWork,
       currentState: `${checkpoint.metadata.ticket_status}; checkpoint ${reconciliation.status}; worktree ${dirty}`,
-      nextAction: extractSection(checkpoint.body, "Exact next action"),
-      blockers: extractSection(checkpoint.body, "Blockers and questions"),
+      currentLocalDiffSummary: currentDiffSummary(snapshot),
+      checks: validationSummary,
+      failures,
+      unresolvedQuestions,
+      failuresAndUnresolvedQuestions: combineRecoverySections([
+        { label: "Failures", value: failures },
+        { label: "Unresolved questions", value: unresolvedQuestions },
+      ]),
+      exactRecommendedNextStep: nextAction,
+      nextAction,
+      blockers,
       requiredApproval: extractSection(checkpoint.body, "Required user approvals"),
       lastSuccessfulValidation: validation,
       reconciliation,
@@ -537,6 +734,52 @@ export class CheckpointStore {
   }
 
   async list(repositoryPath?: string): Promise<ListedCheckpoint[]> {
+    let canonicalRepository: string | undefined;
+    if (repositoryPath !== undefined) canonicalRepository = await findRepositoryRoot(repositoryPath);
+    let workspaces;
+    try {
+      workspaces = await readdir(this.workspacesRoot, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const results: ListedCheckpoint[] = [];
+    for (const workspace of workspaces.filter((entry) => entry.isDirectory())) {
+      const storiesPath = path.join(this.workspacesRoot, workspace.name, "stories");
+      let stories;
+      try {
+        stories = await readdir(storiesPath, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      for (const story of stories.filter((entry) => entry.isDirectory())) {
+        const filePath = path.join(storiesPath, story.name, "context.md");
+        try {
+          await access(filePath, constants.R_OK);
+          const source = await readFileOrNull(filePath);
+          if (source === null) continue;
+          const checkpoint = parseCheckpoint(source);
+          if (checkpoint.metadata.project_slug !== workspace.name || checkpoint.metadata.ticket_key !== story.name) {
+            throw new StoryStackError("Checkpoint identity does not match its state directory", "INVALID_CHECKPOINT");
+          }
+          if (
+            canonicalRepository === undefined ||
+            comparablePath(checkpoint.metadata.repository_path) === comparablePath(canonicalRepository)
+          ) {
+            results.push({ checkpointPath: filePath, metadata: checkpoint.metadata });
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+            results.push({ checkpointPath: filePath, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
+      }
+    }
+    return results.sort((a, b) => a.checkpointPath.localeCompare(b.checkpointPath, "en"));
+  }
+
+  async listLegacy(repositoryPath?: string): Promise<ListedCheckpoint[]> {
     let canonicalRepository: string | undefined;
     if (repositoryPath !== undefined) canonicalRepository = await findRepositoryRoot(repositoryPath);
     let projects;
@@ -549,16 +792,20 @@ export class CheckpointStore {
     const results: ListedCheckpoint[] = [];
     for (const project of projects.filter((entry) => entry.isDirectory())) {
       const projectPath = path.join(this.stateRoot, project.name);
-      const tickets = await readdir(projectPath, { withFileTypes: true });
+      let tickets;
+      try {
+        tickets = await readdir(projectPath, { withFileTypes: true });
+      } catch {
+        continue;
+      }
       for (const ticket of tickets.filter((entry) => entry.isDirectory())) {
         const filePath = path.join(projectPath, ticket.name, "context.md");
         try {
-          await access(filePath, constants.R_OK);
           const source = await readFileOrNull(filePath);
           if (source === null) continue;
           const checkpoint = parseCheckpoint(source);
           if (checkpoint.metadata.project_slug !== project.name || checkpoint.metadata.ticket_key !== ticket.name) {
-            throw new StoryStackError("Checkpoint identity does not match its state directory", "INVALID_CHECKPOINT");
+            throw new StoryStackError("Legacy checkpoint identity does not match its state directory", "INVALID_CHECKPOINT");
           }
           if (
             canonicalRepository === undefined ||
@@ -607,26 +854,52 @@ export class CheckpointStore {
     }
   }
 
+  private async repairBundle(checkpoint: Checkpoint, expectedSource: string): Promise<string[]> {
+    const health = await inspectContinuityBundle(
+      this.bundlePathsFor({
+        projectSlug: checkpoint.metadata.project_slug,
+        ticketKey: checkpoint.metadata.ticket_key,
+      }),
+      checkpoint,
+    );
+    if (health.status === "current") return [];
+    if (health.status === "missing-required-information") {
+      throw new StoryStackError(health.reasons.join(" "), "UNSAFE_STATE_FILE", 4);
+    }
+    return this.writeWithCompareAndSwap(
+      { projectSlug: checkpoint.metadata.project_slug, ticketKey: checkpoint.metadata.ticket_key },
+      checkpoint,
+      expectedSource,
+    );
+  }
+
   private async writeWithCompareAndSwap(
-    filePath: string,
+    identity: CheckpointIdentity,
     checkpoint: Checkpoint,
     expectedSource: string | null,
-  ): Promise<void> {
-    await assertSafeWritePath(this.stateRoot, filePath);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await assertSafeWritePath(this.stateRoot, filePath);
+  ): Promise<string[]> {
+    if (
+      checkpoint.metadata.project_slug !== identity.projectSlug ||
+      checkpoint.metadata.ticket_key !== identity.ticketKey
+    ) {
+      throw new StoryStackError("Checkpoint identity does not match its continuity bundle", "INVALID_CHECKPOINT");
+    }
+    const paths = this.bundlePathsFor(identity);
+    await assertSafeWritePath(this.workspacesRoot, paths.context);
+    await mkdir(path.dirname(paths.lock), { recursive: true });
+    await assertSafeWritePath(this.workspacesRoot, paths.context);
+    await assertSafeWritePath(this.workspacesRoot, paths.lock);
     const expectedDigest = expectedSource === null ? null : digest(expectedSource);
-    const lockPath = `${filePath}.lock`;
     let lockHandle;
     let ownsLock = false;
     try {
-      lockHandle = await acquireCheckpointLock(lockPath);
+      lockHandle = await acquireCheckpointLock(paths.lock);
       ownsLock = true;
       await lockHandle.close();
       lockHandle = undefined;
       const verifyUnchanged = async () => {
-        await assertSafeWritePath(this.stateRoot, filePath);
-        const currentSource = await readFileOrNull(filePath);
+        await assertSafeWritePath(this.workspacesRoot, paths.context);
+        const currentSource = await readFileOrNull(paths.context);
         const currentDigest = currentSource === null ? null : digest(currentSource);
         if (currentDigest !== expectedDigest) {
           throw new StoryStackError(
@@ -636,10 +909,51 @@ export class CheckpointStore {
         }
       };
       await verifyUnchanged();
-      await writeFileAtomic(filePath, serializeCheckpoint(checkpoint), { beforeRename: verifyUnchanged });
+      const rendered = renderContinuityBundle(checkpoint);
+      if (expectedSource === null) {
+        await publishInitialContinuityBundle(this.workspacesRoot, paths, rendered);
+        return [...Object.keys(rendered.files)];
+      }
+      const changedFiles: string[] = [];
+      for (const fileName of ["decisions.md", "progress.md", "checks.md", "handoff.md"] as const) {
+        if (await writeBundleFileIfDifferent(this.workspacesRoot, paths, rendered, fileName)) changedFiles.push(fileName);
+      }
+      if (
+        await writeBundleFileIfDifferent(
+          this.workspacesRoot,
+          paths,
+          rendered,
+          "context.md",
+          verifyUnchanged,
+        )
+      ) {
+        changedFiles.push("context.md");
+      }
+      const committedSource = rendered.files["context.md"];
+      const verifyCommitted = async () => {
+        const currentSource = await readFileOrNull(paths.context);
+        if (currentSource !== committedSource) {
+          throw new StoryStackError(
+            "Canonical checkpoint changed before the bundle commit marker was written",
+            "CHECKPOINT_CONFLICT",
+          );
+        }
+      };
+      if (
+        await writeBundleFileIfDifferent(
+          this.workspacesRoot,
+          paths,
+          rendered,
+          "state.json",
+          verifyCommitted,
+        )
+      ) {
+        changedFiles.push("state.json");
+      }
+      return changedFiles;
     } finally {
       if (lockHandle !== undefined) await lockHandle.close().catch(() => undefined);
-      if (ownsLock) await rm(lockPath, { force: true }).catch(() => undefined);
+      if (ownsLock) await rm(paths.lock, { force: true }).catch(() => undefined);
     }
   }
 }

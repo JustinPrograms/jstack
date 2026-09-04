@@ -92,13 +92,33 @@ test("uninstall manifests reject path traversal before resolving targets", () =>
   assert.throws(() => parseInstallManifest(malicious), /unsafe relative path/u);
 });
 
+test("legacy schema-v2 installations without destination roots remain parseable after normalization", () => {
+  const legacyV2 = JSON.stringify({
+    schema_version: 2,
+    package_version: "0.2.0",
+    runtime_entries: [],
+    installations: [{
+      key: "global:claude",
+      target: "claude",
+      scope: "global",
+      workspace_id: null,
+      entries: [],
+    }],
+  });
+  const normalized = parseInstallManifest(legacyV2);
+  assert.equal(normalized.schema_version, 2);
+  if (normalized.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  assert.equal(normalized.installations[0]?.destination_root, null);
+  assert.doesNotThrow(() => parseInstallManifest(JSON.stringify(normalized)));
+});
+
 test("manifest uninstall removes unchanged files but preserves modified files and ticket state", async (t) => {
   const root = await temporaryDirectory(t, "story-stack-install-apply-");
   const options = targets(root);
   const install = await applyInstall(options);
   assert.equal(install.written.length > 10, true);
   const manifest = await readFile(install.manifestPath, "utf8");
-  assert.match(manifest, /"schema_version": 1/u);
+  assert.match(manifest, /"schema_version": 2/u);
   const launcherResult = await execFileAsync(
     process.execPath,
     [path.join(options.storyStackHome, "bin", "story-stack.js"), "doctor", "--json"],

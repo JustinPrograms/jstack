@@ -1,14 +1,23 @@
-import { lstat, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { StoryStackError } from "../errors.js";
 
-async function lstatOrNull(target: string) {
+export async function lstatOrNull(target: string) {
   try {
     return await lstat(target);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function readRegularFileOrNull(filePath: string): Promise<string | null> {
+  const stats = await lstatOrNull(filePath);
+  if (stats === null) return null;
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new StoryStackError(`State path must be a regular file, not a link or directory: ${filePath}`, "UNSAFE_STATE_FILE");
+  }
+  return readFile(filePath, "utf8");
 }
 
 export async function assertSafeWritePath(root: string, target: string): Promise<void> {
@@ -41,6 +50,10 @@ export async function assertSafeWritePath(root: string, target: string): Promise
     if (path.isAbsolute(canonicalRelative) || canonicalRelative === ".." || canonicalRelative.startsWith(`..${path.sep}`)) {
       throw new StoryStackError("Checkpoint parent resolves outside the configured state root", "PATH_TRAVERSAL");
     }
+  }
+  const targetStats = await lstatOrNull(resolvedTarget);
+  if (targetStats !== null && (targetStats.isSymbolicLink() || !targetStats.isFile())) {
+    throw new StoryStackError(`Refusing to replace a non-regular state file: ${resolvedTarget}`, "UNSAFE_STATE_FILE");
   }
 }
 
