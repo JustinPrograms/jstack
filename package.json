@@ -1,0 +1,23 @@
+{
+  "name": "story-stack",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Local-first checkpoint tooling and Claude Code skills for ticket-based engineering work.",
+  "type": "module",
+  "bin": {
+    "story-stack": "./dist/src/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prebuild": "tsc -b --clean tsconfig.json",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test --test-reporter=spec dist/test/identifiers.test.js dist/test/checkpoint.test.js dist/test/git.test.js dist/test/reconciliation.test.js dist/test/installer.test.js dist/test/skills-policy.test.js dist/test/lifecycle.test.js dist/test/plan-eng-review.test.js",
+    "story-stack": "node dist/src/cli.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0"
+  }
+}
