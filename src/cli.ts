@@ -755,6 +755,7 @@ async function runState(
       `Next action: ${summary.exactRecommendedNextStep}`,
       `Blockers: ${summary.blockers}`,
       `Required approval: ${summary.requiredApproval}`,
+      `Routing: ${summary.routing}`,
       `Last successful validation: ${summary.lastSuccessfulValidation}`,
     ].join("\n");
     emit(context.io, wantsJson, { ok: summary.reconciliation.status === "current", ...summary }, human);
