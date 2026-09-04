@@ -180,7 +180,8 @@ export function normalizeScope(repositoryRoot: string, candidate: string): strin
   const target = path.resolve(root, candidate);
   const relative = path.relative(root, target);
   if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) throw invalid("Routing scope escapes the repository");
-  return relative.length === 0 ? "." : relative.split(path.sep).join("/").toLocaleLowerCase();
+  const normalized = relative.length === 0 ? "." : relative.split(path.sep).join("/");
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
 export function scopesOverlap(left: readonly string[], right: readonly string[]): boolean {
