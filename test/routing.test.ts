@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
@@ -12,6 +13,9 @@ import {
   serializeRoutingRecord,
   validateRoutingRecord,
 } from "../src/routing.js";
+import { CheckpointStore } from "../src/checkpoint/store.js";
+import { main, type CliIo } from "../src/cli.js";
+import { createGitRepository, temporaryDirectory } from "./helpers/git-fixture.js";
 
 const NOW = "2026-09-04T12:00:00.000Z";
 
@@ -75,4 +79,34 @@ test("assessment makes escalation and low-usage boundaries explicit", () => {
   const lowUsage = { ...policy, mode: "low-usage" as const };
   assert.equal(assessRoutingTask(medium, lowUsage).result, "do-not-delegate");
   assert.equal(assessRoutingTask({ ...medium, low_usage_attestation: "A bounded review avoids duplicate exploration." }, lowUsage).result, "recommended");
+});
+
+test("routing CLI is explicit, JSON-safe, and preserves a bounded local record", async (t) => {
+  const fixture = await createGitRepository(t);
+  const home = await temporaryDirectory(t, "routing CLI home ");
+  const identity = { projectSlug: "routing-project", ticketKey: "DEMO-404" } as const;
+  const store = new CheckpointStore({ justinStackHome: home, legacyStateRoot: path.join(home, "legacy"), packageRoot: path.resolve(".") });
+  await store.create({ ...identity, repositoryPath: fixture.root, baseBranch: "main" });
+  const taskFile = path.join(fixture.root, "routing task.json");
+  await writeFile(taskFile, JSON.stringify({
+    id: "routing-404",
+    work_class: "medium",
+    rationale: "A focused implementation has one bounded write scope.",
+    read_scopes: ["src"],
+    write_scopes: ["src/routing.ts"],
+    host: null,
+    model: null,
+    low_usage_attestation: null,
+  }), "utf8");
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const io: CliIo = { stdout: (line) => stdout.push(line), stderr: (line) => stderr.push(line) };
+  const shared = { cwd: fixture.root, packageRoot: path.resolve("."), env: { ...process.env, JUSTINSTACK_HOME: home }, io };
+  assert.equal(await main(["state", "upgrade-routing", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--json"], shared), 0);
+  assert.equal(await main(["state", "routing", "assess", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--input-file", taskFile, "--json"], shared), 0);
+  assert.equal(JSON.parse(stdout.at(-1) ?? "{}").result, "recommended");
+  assert.equal(await main(["state", "routing", "declare", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--input-file", taskFile, "--json"], shared), 0);
+  assert.equal(await main(["state", "routing", "inspect", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--json"], shared), 0);
+  assert.equal(JSON.parse(stdout.at(-1) ?? "{}").routing.tasks[0].id, "routing-404");
+  assert.deepEqual(stderr, []);
 });

@@ -5,12 +5,24 @@ import os from "node:os";
 import path from "node:path";
 import { StoryStackError } from "../errors.js";
 import {
+  emptyRoutingRecord,
+  normalizeScope,
+  parseRoutingRecord,
+  serializeRoutingRecord,
+  validateRoutingRecord,
+  validateRoutingTask,
+  type RoutingEvidence,
+  type RoutingRecord,
+  type RoutingTask,
+} from "../routing.js";
+import {
   inspectContinuityBundle,
   publishInitialContinuityBundle,
   renderContinuityBundle,
   writeBundleFileIfDifferent,
 } from "./bundle.js";
 import { assertSafeWritePath, readRegularFileOrNull } from "./filesystem.js";
+import { writeFileAtomic } from "./atomic.js";
 import { metadataEqualsExceptUpdatedAt, parseCheckpoint, serializeCheckpoint } from "./frontmatter.js";
 import { captureGitSnapshot, detectBaseBranch, findRepositoryRoot, validateBaseBranch } from "./git.js";
 import {
@@ -109,6 +121,7 @@ export interface RecoverySummary {
   blockers: string;
   requiredApproval: string;
   lastSuccessfulValidation: string;
+  routing: string;
   reconciliation: ReconciliationResult;
 }
 
@@ -413,6 +426,104 @@ export class CheckpointStore {
     return inspectContinuityBundle(this.bundlePathsFor(identity), await this.load(identity));
   }
 
+  /** Returns null until the coordinator explicitly initializes advisory routing for this story. */
+  async loadRouting(identity: CheckpointIdentity): Promise<RoutingRecord | null> {
+    const source = await readRegularFileOrNull(this.bundlePathsFor(identity).routing);
+    return source === null ? null : parseRoutingRecord(source);
+  }
+
+  async upgradeRouting(identity: CheckpointIdentity, repositoryPath: string): Promise<{ changed: boolean; routing: RoutingRecord }> {
+    const checkpoint = await this.load(identity);
+    const snapshot = await captureGitSnapshot(repositoryPath);
+    this.assertSameRepository(checkpoint.metadata, snapshot);
+    if (checkpoint.metadata.current_branch !== snapshot.currentBranch) {
+      throw new StoryStackError("Refusing to initialize routing from a different branch", "BRANCH_MISMATCH", 3);
+    }
+    return this.mutateRouting(identity, (routing) => ({ routing, changed: false }), true);
+  }
+
+  async declareRoutingTask(
+    identity: CheckpointIdentity,
+    repositoryPath: string,
+    task: RoutingTask,
+  ): Promise<{ changed: boolean; routing: RoutingRecord; task: RoutingTask }> {
+    const checkpoint = await this.assertRoutingRepository(identity, repositoryPath);
+    const normalized = normalizeRoutingTaskScopes(task, checkpoint.metadata.repository_path);
+    return this.mutateRouting(identity, (routing) => {
+      const existing = routing.tasks.find((item) => item.id === normalized.id);
+      if (existing !== undefined) {
+        if (JSON.stringify(existing) !== JSON.stringify(normalized)) {
+          throw new StoryStackError(`Routing task '${normalized.id}' already exists with different data`, "ROUTING_CONFLICT", 4);
+        }
+        return { routing, changed: false, task: existing };
+      }
+      if (routing.tasks.filter((item) => item.status === "declared").length >= 32) {
+        throw new StoryStackError("Routing record has too many declared tasks", "ROUTING_LIMIT", 4);
+      }
+      const next = validateRoutingRecord({ ...routing, tasks: [...routing.tasks, normalized] });
+      return { routing: next, changed: true, task: normalized };
+    });
+  }
+
+  async recordRoutingAttempt(
+    identity: CheckpointIdentity,
+    repositoryPath: string,
+    taskId: string,
+    evidence: RoutingEvidence,
+  ): Promise<{ changed: boolean; routing: RoutingRecord; task: RoutingTask }> {
+    await this.assertRoutingRepository(identity, repositoryPath);
+    return this.mutateRouting(identity, (routing) => {
+      const index = routing.tasks.findIndex((item) => item.id === taskId);
+      if (index < 0) throw new StoryStackError(`Routing task '${taskId}' was not found`, "ROUTING_NOT_FOUND", 4);
+      const current = routing.tasks[index];
+      if (current === undefined || current.status === "completed" || current.status === "abandoned") {
+        throw new StoryStackError("Cannot record an attempt for a terminal routing task", "INVALID_ROUTING_TRANSITION", 4);
+      }
+      const validatedEvidence = validateRoutingRecord({ schema_version: 1, tasks: [{ ...current, evidence: [...current.evidence, evidence] }] }).tasks[0]?.evidence.at(-1);
+      if (validatedEvidence === undefined) throw new StoryStackError("Routing evidence could not be validated", "INVALID_ROUTING");
+      const duplicate = current.evidence.find((item) => item.attempt_id === validatedEvidence.attempt_id);
+      if (duplicate !== undefined) {
+        if (JSON.stringify(duplicate) !== JSON.stringify(validatedEvidence)) throw new StoryStackError("Routing attempt ID already exists with different evidence", "ROUTING_CONFLICT", 4);
+        return { routing, changed: false, task: current };
+      }
+      const task = validateRoutingTask({ ...current, evidence: [...current.evidence, validatedEvidence], updated_at: this.clock().toISOString() });
+      const tasks = [...routing.tasks];
+      tasks[index] = task;
+      return { routing: validateRoutingRecord({ ...routing, tasks }), changed: true, task };
+    });
+  }
+
+  async transitionRoutingTask(
+    identity: CheckpointIdentity,
+    repositoryPath: string,
+    taskId: string,
+    status: Extract<RoutingTask["status"], "completed" | "abandoned" | "unknown-after-resume">,
+  ): Promise<{ changed: boolean; routing: RoutingRecord; task: RoutingTask }> {
+    await this.assertRoutingRepository(identity, repositoryPath);
+    return this.mutateRouting(identity, (routing) => {
+      const index = routing.tasks.findIndex((item) => item.id === taskId);
+      if (index < 0) throw new StoryStackError(`Routing task '${taskId}' was not found`, "ROUTING_NOT_FOUND", 4);
+      const current = routing.tasks[index];
+      if (current === undefined) throw new StoryStackError("Routing task was not found", "ROUTING_NOT_FOUND", 4);
+      if (current.status === status) return { routing, changed: false, task: current };
+      if (current.status === "completed" || current.status === "abandoned") throw new StoryStackError("Cannot change a terminal routing task", "INVALID_ROUTING_TRANSITION", 4);
+      const task = validateRoutingTask({ ...current, status, updated_at: this.clock().toISOString() });
+      const tasks = [...routing.tasks];
+      tasks[index] = task;
+      return { routing: validateRoutingRecord({ ...routing, tasks }), changed: true, task };
+    });
+  }
+
+  async reconcileRoutingResume(identity: CheckpointIdentity, repositoryPath: string): Promise<{ changed: boolean; routing: RoutingRecord }> {
+    await this.assertRoutingRepository(identity, repositoryPath);
+    return this.mutateRouting(identity, (routing) => {
+      const now = this.clock().toISOString();
+      const tasks = routing.tasks.map((task) => task.status === "declared" ? validateRoutingTask({ ...task, status: "unknown-after-resume", updated_at: now }) : task);
+      const changed = tasks.some((task, index) => task !== routing.tasks[index]);
+      return { routing: changed ? validateRoutingRecord({ ...routing, tasks }) : routing, changed };
+    });
+  }
+
   /** Copy a validated legacy checkpoint into the bundle layout without removing the source. */
   async migrateLegacy(identity: CheckpointIdentity): Promise<MutationResult> {
     const legacy = await this.loadLegacy(identity);
@@ -680,6 +791,7 @@ export class CheckpointStore {
 
   async recovery(identity: CheckpointIdentity, repositoryPath: string): Promise<RecoverySummary> {
     const checkpoint = await this.load(identity);
+    const routing = await this.loadRouting(identity);
     const snapshot = await captureGitSnapshot(repositoryPath);
     const reconciliation = includeBundleHealth(
       reconcileCheckpoint(checkpoint.metadata, snapshot),
@@ -729,6 +841,11 @@ export class CheckpointStore {
       blockers,
       requiredApproval: extractSection(checkpoint.body, "Required user approvals"),
       lastSuccessfulValidation: validation,
+      routing: routing === null
+        ? "Not recorded. Run state upgrade-routing before declaring advisory routing tasks."
+        : routing.tasks.length === 0
+          ? "No routing tasks recorded."
+          : routing.tasks.map((task) => `${task.id}: ${task.status}; ${task.work_class}; ${task.result}`).join("\n"),
       reconciliation,
     };
   }
@@ -854,6 +971,46 @@ export class CheckpointStore {
     }
   }
 
+  private async assertRoutingRepository(identity: CheckpointIdentity, repositoryPath: string): Promise<Checkpoint> {
+    const checkpoint = await this.load(identity);
+    const snapshot = await captureGitSnapshot(repositoryPath);
+    this.assertSameRepository(checkpoint.metadata, snapshot);
+    if (checkpoint.metadata.current_branch !== snapshot.currentBranch) {
+      throw new StoryStackError("Refusing to change routing from a different branch", "BRANCH_MISMATCH", 3);
+    }
+    return checkpoint;
+  }
+
+  private async mutateRouting<T extends { routing: RoutingRecord; changed: boolean }>(
+    identity: CheckpointIdentity,
+    mutate: (routing: RoutingRecord) => T,
+    createIfMissing = false,
+  ): Promise<T> {
+    const paths = this.bundlePathsFor(identity);
+    await assertSafeWritePath(this.workspacesRoot, paths.routing);
+    await mkdir(path.dirname(paths.lock), { recursive: true });
+    await assertSafeWritePath(this.workspacesRoot, paths.lock);
+    let lockHandle;
+    let ownsLock = false;
+    try {
+      lockHandle = await acquireCheckpointLock(paths.lock);
+      ownsLock = true;
+      await lockHandle.close();
+      lockHandle = undefined;
+      const source = await readRegularFileOrNull(paths.routing);
+      if (source === null && !createIfMissing) {
+        throw new StoryStackError("Routing is not initialized for this story; run state upgrade-routing first", "ROUTING_UPGRADE_REQUIRED", 4);
+      }
+      const current = source === null ? emptyRoutingRecord() : parseRoutingRecord(source);
+      const result = mutate(current);
+      if (result.changed || source === null) await writeFileAtomic(paths.routing, serializeRoutingRecord(result.routing));
+      return { ...result, changed: result.changed || source === null };
+    } finally {
+      if (lockHandle !== undefined) await lockHandle.close().catch(() => undefined);
+      if (ownsLock) await rm(paths.lock, { force: true }).catch(() => undefined);
+    }
+  }
+
   private async repairBundle(checkpoint: Checkpoint, expectedSource: string): Promise<string[]> {
     const health = await inspectContinuityBundle(
       this.bundlePathsFor({
@@ -956,6 +1113,14 @@ export class CheckpointStore {
       if (ownsLock) await rm(paths.lock, { force: true }).catch(() => undefined);
     }
   }
+}
+
+function normalizeRoutingTaskScopes(task: RoutingTask, repositoryRoot: string): RoutingTask {
+  return validateRoutingTask({
+    ...task,
+    read_scopes: task.read_scopes.map((scope) => normalizeScope(repositoryRoot, scope)),
+    write_scopes: task.write_scopes.map((scope) => normalizeScope(repositoryRoot, scope)),
+  });
 }
 
 export function assertTicketStatus(value: string): asserts value is TicketStatus {

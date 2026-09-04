@@ -17,6 +17,15 @@ import { packageRootFromModule } from "./checkpoint/template.js";
 import { serializeCheckpoint } from "./checkpoint/frontmatter.js";
 import { StoryStackError, errorMessage } from "./errors.js";
 import {
+  assessRoutingTask,
+  defaultRoutingPolicy,
+  digestRoutingPolicy,
+  validateRoutingTask,
+  type RoutingEvidence,
+  type RoutingTask,
+  type WorkClass,
+} from "./routing.js";
+import {
   applyInstall,
   applyUninstall,
   formatInstallPlan,
@@ -186,11 +195,15 @@ function usage(): string {
     "Commands:",
     "  doctor --target <claude|bob|codex|all> --scope <project|global>",
     "  state init --workspace <slug> --story <KEY> [--repo <path>] [--base-branch <name>] [--objective <text>]",
-    "  state path|show|validate|snapshot|bundle-status|repair|recovery|complete [--workspace <slug> --story <KEY>] [--repo <path>]",
+    "  state path|show|validate|snapshot|bundle-status|repair|recovery|complete|upgrade-routing [--workspace <slug> --story <KEY>] [--repo <path>]",
     "  state migrate --workspace <slug> --story <KEY>",
     "  state update [identity] [--repo <path>] --body-file <path> [--section <heading>] [--status <status>]",
     "  state approve-plan [identity] [--repo <path>] --body-file <path> --confirm-user-approved",
     "  state list [--repo <path>]",
+    "  state routing assess|declare --input-file <path> [--workspace <slug> --story <KEY>] [--repo <path>]",
+    "  state routing record-attempt --task <id> --input-file <path> [identity] [--repo <path>]",
+    "  state routing complete|abandon --task <id> [identity] [--repo <path>]",
+    "  state routing inspect|reconcile-resume [identity] [--repo <path>]",
     "  install --target <claude|bob|codex|all> --scope <project|global> [--apply]",
     "  uninstall --target <claude|bob|codex|all> --scope <project|global> [--apply]",
     "  safety check --command <proposed-command>",
@@ -309,6 +322,138 @@ async function resolveIdentity(
   );
 }
 
+function readRoutingTaskInput(source: string): Omit<RoutingTask, "status" | "result" | "recommendation" | "policy_digest" | "evidence" | "created_at" | "updated_at"> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch {
+    throw new StoryStackError("Routing task input is not valid JSON", "INVALID_ROUTING");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new StoryStackError("Routing task input must be a JSON object", "INVALID_ROUTING");
+  }
+  const record = parsed as Record<string, unknown>;
+  const keys = ["id", "work_class", "rationale", "read_scopes", "write_scopes", "host", "model", "low_usage_attestation"];
+  if (JSON.stringify(Object.keys(record).sort()) !== JSON.stringify([...keys].sort())) {
+    throw new StoryStackError("Routing task input has missing or unknown fields", "INVALID_ROUTING");
+  }
+  const validated = validateRoutingTask({
+    id: record.id,
+    status: "declared",
+    work_class: record.work_class,
+    result: "recommended",
+    recommendation: "standard",
+    rationale: record.rationale,
+    read_scopes: record.read_scopes,
+    write_scopes: record.write_scopes,
+    host: record.host,
+    model: record.model,
+    policy_digest: "a".repeat(64),
+    low_usage_attestation: record.low_usage_attestation,
+    evidence: [],
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  });
+  return {
+    id: validated.id,
+    work_class: validated.work_class,
+    rationale: validated.rationale,
+    read_scopes: validated.read_scopes,
+    write_scopes: validated.write_scopes,
+    host: validated.host,
+    model: validated.model,
+    low_usage_attestation: validated.low_usage_attestation,
+  };
+}
+
+function readRoutingEvidenceInput(source: string): RoutingEvidence {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch {
+    throw new StoryStackError("Routing evidence input is not valid JSON", "INVALID_ROUTING");
+  }
+  const task = validateRoutingTask({
+    id: "temporary-input",
+    status: "declared",
+    work_class: "light",
+    result: "recommended",
+    recommendation: "low_cost",
+    rationale: "Validate one routing evidence input.",
+    read_scopes: [],
+    write_scopes: [],
+    host: null,
+    model: null,
+    policy_digest: "a".repeat(64),
+    low_usage_attestation: null,
+    evidence: [parsed],
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  });
+  const evidence = task.evidence[0];
+  if (evidence === undefined) throw new StoryStackError("Routing evidence input is missing", "INVALID_ROUTING");
+  return evidence;
+}
+
+async function runRouting(
+  parsed: ParsedArguments,
+  context: Required<Pick<CliContext, "cwd" | "env" | "io" | "packageRoot">>,
+  store: CheckpointStore,
+  repositoryPath: string,
+  wantsJson: boolean,
+): Promise<number> {
+  const action = parsed.positionals[2];
+  if (action === undefined || !["assess", "declare", "record-attempt", "complete", "abandon", "inspect", "reconcile-resume"].includes(action)) {
+    throw new StoryStackError("Use a supported state routing action", "INVALID_ARGUMENTS");
+  }
+  const options = ["workspace", "story", "project", "ticket", "repo", "input-file", "task"];
+  assertAllowedOptions(parsed, options);
+  const identity = await resolveIdentity(store, parsed, repositoryPath);
+  const inputFile = stringOption(parsed, "input-file");
+  if (["assess", "declare", "record-attempt"].includes(action) && !inputFile) {
+    throw new StoryStackError(`state routing ${action} requires --input-file`, "INVALID_ARGUMENTS");
+  }
+  if (["complete", "abandon", "record-attempt"].includes(action) && !stringOption(parsed, "task")) {
+    throw new StoryStackError(`state routing ${action} requires --task`, "INVALID_ARGUMENTS");
+  }
+  if (["inspect", "reconcile-resume"].includes(action) && (inputFile !== undefined || stringOption(parsed, "task") !== undefined)) {
+    throw new StoryStackError(`state routing ${action} accepts no task input`, "INVALID_ARGUMENTS");
+  }
+  if (action === "assess" || action === "declare") {
+    const input = readRoutingTaskInput(await readFile(path.resolve(inputFile ?? ""), "utf8"));
+    const policy = defaultRoutingPolicy();
+    const assessment = assessRoutingTask(input, policy);
+    if (action === "assess") {
+      emit(context.io, wantsJson, { ok: true, ...assessment, policy }, `${assessment.result}: ${assessment.rationale}`);
+      return 0;
+    }
+    const now = new Date().toISOString();
+    const task = validateRoutingTask({ ...input, status: "declared", ...assessment, policy_digest: digestRoutingPolicy(policy), evidence: [], created_at: now, updated_at: now });
+    const result = await store.declareRoutingTask(identity, repositoryPath, task);
+    emit(context.io, wantsJson, { ok: true, changed: result.changed, task: result.task, result: result.task.result }, `${result.task.result}: routing task ${result.task.id} declared`);
+    return 0;
+  }
+  if (action === "record-attempt") {
+    const evidence = readRoutingEvidenceInput(await readFile(path.resolve(inputFile ?? ""), "utf8"));
+    const result = await store.recordRoutingAttempt(identity, repositoryPath, stringOption(parsed, "task") ?? "", evidence);
+    emit(context.io, wantsJson, { ok: true, changed: result.changed, task: result.task }, `Recorded routing attempt for ${result.task.id}`);
+    return 0;
+  }
+  if (action === "complete" || action === "abandon") {
+    const result = await store.transitionRoutingTask(identity, repositoryPath, stringOption(parsed, "task") ?? "", action === "complete" ? "completed" : "abandoned");
+    emit(context.io, wantsJson, { ok: true, changed: result.changed, task: result.task }, `Routing task ${result.task.id} is ${result.task.status}`);
+    return 0;
+  }
+  if (action === "inspect") {
+    const routing = await store.loadRouting(identity);
+    emit(context.io, wantsJson, { ok: true, routing: routing ?? "not-recorded" }, routing === null ? "Routing: not recorded" : JSON.stringify(routing, null, 2));
+    return 0;
+  }
+  const result = await store.reconcileRoutingResume(identity, repositoryPath);
+  emit(context.io, wantsJson, { ok: true, changed: result.changed, routing: result.routing }, result.changed ? "Reconciled declared routing tasks after resume." : "No declared routing tasks to reconcile.");
+  return 0;
+}
+
 async function runState(
   parsed: ParsedArguments,
   context: Required<Pick<CliContext, "cwd" | "env" | "io" | "packageRoot">>,
@@ -318,8 +463,10 @@ async function runState(
     context.io.stdout(usage());
     return action ? 0 : 1;
   }
-  if (parsed.positionals.length > 2) throw new StoryStackError("Too many positional arguments", "INVALID_ARGUMENTS");
-  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "bundle-status", "repair", "migrate", "update", "approve-plan", "complete", "recovery"]);
+  if ((action === "routing" && parsed.positionals.length !== 3) || (action !== "routing" && parsed.positionals.length > 2)) {
+    throw new StoryStackError("Too many positional arguments", "INVALID_ARGUMENTS");
+  }
+  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "bundle-status", "repair", "migrate", "upgrade-routing", "routing", "update", "approve-plan", "complete", "recovery"]);
   if (!knownActions.has(action)) throw new StoryStackError(`Unknown state command '${action}'`, "INVALID_ARGUMENTS");
   const store = new CheckpointStore({
     storyStackHome: defaultStoryStackHome(context.env),
@@ -328,6 +475,8 @@ async function runState(
   });
   const repositoryPath = path.resolve(stringOption(parsed, "repo") ?? context.cwd);
   const wantsJson = flag(parsed, "json");
+
+  if (action === "routing") return runRouting(parsed, context, store, repositoryPath, wantsJson);
 
   if (action === "init") {
     assertAllowedOptions(parsed, ["workspace", "story", "project", "ticket", "repo", "base-branch", "objective"]);
@@ -403,6 +552,7 @@ async function runState(
     "bundle-status": ["workspace", "story", "project", "ticket", "repo"],
     repair: ["workspace", "story", "project", "ticket", "repo"],
     migrate: ["workspace", "story", "project", "ticket", "repo"],
+    "upgrade-routing": ["workspace", "story", "project", "ticket", "repo"],
     update: [
       "project",
       "ticket",
@@ -446,6 +596,17 @@ async function runState(
     }
   } else {
     identity = await resolveIdentity(store, parsed, repositoryPath);
+  }
+
+  if (action === "upgrade-routing") {
+    const result = await store.upgradeRouting(identity, repositoryPath);
+    emit(
+      context.io,
+      wantsJson,
+      { ok: true, changed: result.changed, routing: result.routing },
+      result.changed ? "Initialized advisory routing for this story." : "Advisory routing is already initialized.",
+    );
+    return 0;
   }
 
   if (action === "path") {
