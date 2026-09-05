@@ -12,17 +12,17 @@ This repository is maintained with parallel AI-assisted work. Treat each impleme
 
 ## Required worktree workflow
 
-For code or documentation changes, use a dedicated worktree and branch. The primary checkout may contain another agent's in-progress work and must be treated as read-only.
+For code or documentation changes, use a dedicated worktree and branch beneath the repository-local `.worktree/` directory. The primary checkout may contain another agent's in-progress work and must be treated as read-only.
 
 1. From the primary checkout, inspect `git status --short --branch`. Remote retrieval such as `git fetch` is read-only but must still be relevant to the current request and allowed by the active environment.
-2. Create a uniquely named branch and worktree outside the primary checkout, based on the intended local target branch. For example, for `main`:
+2. Create a uniquely named branch and worktree beneath `.worktree/`, based on the intended local target branch. For example, for `main`:
 
    ```powershell
-   New-Item -ItemType Directory -Force ..\justinstack-worktrees | Out-Null
-   git worktree add -b agent/<topic> ..\justinstack-worktrees\<topic> main
+   New-Item -ItemType Directory -Force .worktree | Out-Null
+   git worktree add -b agent/<topic> .worktree/<topic> main
    ```
 
-3. Make, test, and inspect changes only inside that worktree. Keep generated artifacts out of commits unless the repository convention requires them.
+3. Make, test, and inspect changes only inside that worktree. `.worktree/` is ignored and must never be committed. Keep generated artifacts out of commits unless the repository convention requires them.
 4. Before handoff, inspect the exact working-tree diff, run `git diff --check`, and confirm `git status --short` contains only task files. Do not stage as part of this check.
 
 ## Commit and remote policy
@@ -38,10 +38,10 @@ There is no standing authorization to write Git history or mutate a remote. A re
 
 Keep the worktree after handoff so the branch remains available for review and follow-up. Do not remove a worktree, delete a branch, or perform post-merge cleanup unless the user explicitly requests that exact local action and the target has been verified.
 
-When cleanup is explicitly requested, run it only from a checkout outside the task worktree and target the exact verified path:
+When cleanup is explicitly requested, run it only from a checkout outside the task worktree and target the exact verified `.worktree/<topic>` path:
 
 ```powershell
-git worktree remove ..\justinstack-worktrees\<topic>
+git worktree remove .worktree/<topic>
 git worktree prune
 ```
 

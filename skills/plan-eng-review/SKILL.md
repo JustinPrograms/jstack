@@ -63,7 +63,7 @@ Present one concise final plan containing:
 - a test matrix mapping criteria and important branches to test level and command;
 - sequencing, dependencies, and genuinely safe parallel work;
 - decisions, assumptions, unresolved questions, gates, and deferred work; and
-- one exact first implementation action.
+- one exact first implementation action for `implement-story`.
 
 Prefer the smallest complete, testable plan consistent with repository patterns. Do not call it ready while a material question remains.
 
@@ -75,11 +75,11 @@ When the review is stable, show the complete plan and ask for explicit approval 
 
 Only after explicit full-plan approval:
 
-1. Prepare a complete body with the final plan, no material blocker, preserved gates, and the first coding step.
+1. Prepare a complete body with the final plan, no material blocker, preserved gates, and invocation of `implement-story` for the first coding step.
 2. Run `justinstack state approve-plan` with `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path> --body-file <temporary-body.md> --confirm-user-approved`.
 3. Remove the temporary file after success or failure.
 4. Validate again and report the resolved bundle path.
 
 Do not edit bundle files directly. The engine updates the canonical checkpoint and recovery projections. Successful approval marks the story ready; it does not authorize implementation, staging, committing, or any remote action.
 
-Return the reviewed plan, decisions, deferred work, remaining assumptions, test strategy, bundle path, status, and exact next action. State that no application files changed.
+Return the reviewed plan, decisions, deferred work, remaining assumptions, test strategy, bundle path, status, and exact `implement-story` next action. State that no application files changed.
