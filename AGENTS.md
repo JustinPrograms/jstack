@@ -27,12 +27,12 @@ For code or documentation changes, use a dedicated worktree and branch beneath t
 
 ## Commit and remote policy
 
-There is no standing authorization to write Git history or mutate a remote. A request to implement, review, verify, resume, or finish work is not permission to stage, commit, or push.
+There is no standing authorization to write Git history or mutate a remote. An explicit request for a specific Git or remote action in the current conversation provides authorization for that action; requests to implement, review, verify, resume, or finish work do not.
 
-- Never run `git push` or mutate a remote repository, pull request, merge request, ticket, or other remote service.
+- Push or mutate a remote repository, pull request, merge request, ticket, or other remote service only when the user explicitly requests that exact action in the current conversation.
 - Stage or commit only when the user explicitly requests that exact local Git action in the current conversation.
 - If a commit is explicitly requested, use a concise conventional message, stage only intentional files, and inspect the exact staged diff first.
-- Report the worktree path, branch, changed files, checks run, and checks not run. Let the user perform every remote action.
+- Report the worktree path, branch, changed files, checks run, and checks not run.
 
 ## Merge verification and cleanup
 
