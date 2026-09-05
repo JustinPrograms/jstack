@@ -24,8 +24,9 @@ Read-only local Git inspection is allowed. Use read-only remote retrieval only w
 1. Identify every repository or worktree in scope, read its instructions, and inspect Git status. For a non-Git workspace, require an explicit file set, patch, or host change view and state that branch-level coverage is unavailable.
 2. Use a supplied base branch, commit, or path when the user names one. Otherwise determine a reliable local base or merge base without fetching. If the target may contain committed work and no reliable base exists, ask before concluding that there are no changes.
 3. Read the supplied task, acceptance criteria, plan, and decisions. If a prior JStack handoff is supplied, compare its repository/worktree root and branch with the active checkout and stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence.
-4. Inventory the complete relevant change set: committed branch changes from the chosen merge base plus staged, unstaged, and untracked task files. Distinguish pre-existing unrelated work from the review target.
-5. Trace changed behavior through callers, state boundaries, errors, and nearby tests rather than reviewing isolated lines only.
+4. If `.jstack/checkpoint.md` exists, read it as potentially stale context for task intent, decisions, claimed progress, validation, blockers, and approvals. Do not treat it as evidence that code exists, a check passed, an approval remains operative, or work is complete; reconcile every relevant claim against the repository and current conversation.
+5. Inventory the complete relevant change set: committed branch changes from the chosen merge base plus staged, unstaged, and untracked task files. Distinguish pre-existing unrelated work from the review target.
+6. Trace changed behavior through callers, state boundaries, errors, and nearby tests rather than reviewing isolated lines only.
 
 If the intended diff or acceptance criteria are materially ambiguous, state the ambiguity and ask for the smallest clarification needed. Do not guess at a remote pull request or fetch one implicitly.
 
@@ -54,5 +55,7 @@ List findings first, ordered by severity:
 For each finding, give a concise title, severity, exact path and line when available, the failure scenario or impact, supporting evidence, and the smallest fix direction. Keep optional follow-up separate from required corrections.
 
 If there are no findings, say so directly and note residual risks or checks not run. End with the review target, checks performed, and an exact next action: return blockers and should-fix items to `jstack-implement`, or hand a clean result back to the user for their chosen local next step. Do not promise approval or claim tests passed unless you observed them.
+
+Review remains report-only and does not update the checkpoint. When a checkpoint claim is stale or review finds unfinished or incorrect work, include the correction in the review handoff so `jstack-implement` can reconcile the checkpoint while applying authorized fixes.
 
 Always finish with a portable Markdown handoff containing the objective, criteria, review target, decisions, findings, checks, blockers, and exact next skill or action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and reviewed base or diff anchor; explicitly mark any non-Git workspace. Keep it concise and local. Do not create hidden state or write a handoff file unless the user explicitly asks for one.

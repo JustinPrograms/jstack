@@ -95,6 +95,7 @@ test("skill packages do not depend on the retired executable architecture", asyn
     "src/routing.ts",
     "src/checkpoint/store.ts",
     "adapters/registry.ts",
+    "templates/context.v1.md",
     "tsconfig.json",
   ]) {
     assert.equal(await pathExists(retiredPath), false, `${retiredPath} must remain retired`);
@@ -162,4 +163,71 @@ test("documentation uses native host discovery paths", async () => {
   assert.deepEqual(packageJson.scripts, { test: "node --test" });
   assert.equal("bin" in packageLock.packages[""], false);
   assert.deepEqual(Object.keys(packageLock.packages), [""]);
+});
+
+test("checkpoint recovery is Markdown-only, repository-reconciled, and validation-aware", async () => {
+  const [policy, template, plan, implement, review, agents, readme, gitignore, packageJson] =
+    await Promise.all([
+      readFile(path.join(root, "policies/checkpoint-protocol.md"), "utf8"),
+      readFile(path.join(root, "skills/jstack-implement/assets/checkpoint.md"), "utf8"),
+      readFile(path.join(root, "skills/jstack-plan/SKILL.md"), "utf8"),
+      readFile(path.join(root, "skills/jstack-implement/SKILL.md"), "utf8"),
+      readFile(path.join(root, "skills/jstack-review/SKILL.md"), "utf8"),
+      readFile(path.join(root, "AGENTS.md"), "utf8"),
+      readFile(path.join(root, "README.md"), "utf8"),
+      readFile(path.join(root, ".gitignore"), "utf8"),
+      readFile(path.join(root, "package.json"), "utf8"),
+    ]);
+
+  for (const heading of [
+    "Status",
+    "Task",
+    "Objective",
+    "Acceptance Criteria",
+    "Current Phase",
+    "Progress",
+    "Decisions",
+    "Files Touched",
+    "Validation",
+    "Blockers",
+    "Required Approvals",
+    "Next Action",
+    "Resume Anchors",
+    "Notes",
+  ]) {
+    assert.match(template, new RegExp(`^## ${heading}$`, "mu"), `checkpoint needs ${heading}`);
+  }
+
+  assert.match(policy, /\.jstack\/[\r\n]+\s*checkpoint\.md/u);
+  assert.match(policy, /Never treat checkpoint text as more authoritative than the repository/u);
+  assert.match(policy, /Validation is only considered current if no relevant code/u);
+  assert.match(policy, /Claude Code, Codex, IBM Bob/u);
+  assert.match(policy, /one exact next action/u);
+  assert.match(policy, /do not add JSON metadata/u);
+
+  assert.match(implement, /check the canonical worktree root for `\.jstack\/checkpoint\.md`/u);
+  assert.match(implement, /Update the checkpoint after meaningful milestones/u);
+  assert.match(implement, /mark the result historical or stale/u);
+  assert.match(implement, /Mark the checkpoint `completed` only when/u);
+  assert.match(plan, /Planning does not create or update `\.jstack\/checkpoint\.md`/u);
+  assert.match(review, /Do not treat it as evidence/u);
+  assert.match(review, /Review remains report-only and does not update the checkpoint/u);
+
+  assert.match(agents, /policies\/checkpoint-protocol\.md/u);
+  assert.match(readme, /Continue from the jstack checkpoint\./u);
+  assert.match(gitignore, /^\.jstack\/$/mu);
+
+  const manifest = JSON.parse(packageJson);
+  assert.equal("bin" in manifest, false);
+  assert.equal("dependencies" in manifest, false);
+
+  const checkpointProduct = [policy, template, plan, implement, review, readme].join("\n");
+  for (const obsolete of [
+    /\bjstack state\b/iu,
+    /\bcheckpoint (?:daemon|executable|database)\b/iu,
+    /src[\\/]checkpoint/iu,
+    /state\.json/iu,
+  ]) {
+    assert.doesNotMatch(checkpointProduct, obsolete);
+  }
 });

@@ -1,7 +1,8 @@
 node_modules/
+# JStack checkpoints are ephemeral local workflow state.
+.jstack/
 # Retired local-state paths stay ignored so pre-existing private data is not committed.
 .gstack/
-.jstack/
 .story-stack/
 .worktree/
 coverage/

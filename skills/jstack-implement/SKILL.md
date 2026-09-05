@@ -22,10 +22,11 @@ Read-only local Git inspection and relevant read-only retrieval are allowed when
 ## Establish the implementation target
 
 1. Identify every repository or worktree in scope, read its instructions, and record a pre-edit Git status and diff baseline. If a workspace is not a Git repository, say so and record the available filesystem or host change baseline.
-2. Use the plan, task, and current conversation to identify the objective, acceptance criteria, non-goals, constraints, and unresolved decisions.
-3. Treat a prior JStack handoff as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
-4. For a small, precise change, derive a short implementation checklist and proceed. For a material unresolved product or architecture choice, stop and route the task to `jstack-plan`.
-5. Confirm that the requested work does not include a remote mutation or an unrequested Git-history change.
+2. Before broad exploration, check the canonical worktree root for `.jstack/checkpoint.md` even though it should be ignored by Git. If it is active and matches the current task and checkout, reconcile it as described below and resume. If its task or checkout conflicts with the request, do not overwrite it; explain the mismatch and ask which context to use.
+3. Use the plan, task, current conversation, and any reconciled checkpoint to identify the objective, acceptance criteria, non-goals, constraints, and unresolved decisions.
+4. Treat a prior JStack handoff as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
+5. For a small, precise change, derive a short implementation checklist and proceed. For a material unresolved product or architecture choice, stop and route the task to `jstack-plan`.
+6. Confirm that the requested work does not include a remote mutation or an unrequested Git-history change.
 
 ## Inspect before editing
 
@@ -47,6 +48,25 @@ Do not future-proof without evidence, introduce a second implementation of an ex
 
 Delegation is optional. Use it only for bounded, non-overlapping investigation or verification when the host supports it; the coordinating agent owns the final edits, integration decisions, and report.
 
+## Checkpoint and resume
+
+For substantial implementation, maintain one human-readable file at `.jstack/checkpoint.md`. Do not create a checkpoint for a trivial one-line operation unless it materially improves recovery. When creating one, use the bundled `assets/checkpoint.md` as the schema, seed it from the current task, plan, or handoff, and record the canonical worktree root, branch or detached state, HEAD, and base or diff anchor.
+
+Ensure `.jstack/` is ignored before writing the checkpoint. Prefer an existing repository `.gitignore` rule; when task-scoped edits are authorized, add `.jstack/` if needed. Never stage or commit the checkpoint unless the user explicitly requests shared checkpoint state. A shared checkpoint is an opt-in exception, not the default.
+
+Update the checkpoint after meaningful milestones: completing an implementation step, making a material decision, discovering an important constraint, changing the plan, running validation, encountering or resolving a blocker, before handing off, and before ending a session with unfinished work. Replace stale statements instead of appending a transcript. Only the coordinating agent writes the checkpoint; delegated workers return observations.
+
+When resuming, treat the checkpoint as potentially stale and the repository as authoritative:
+
+1. Read the checkpoint, inspect Git status and the current diff, and inspect the relevant changed files.
+2. Compare the recorded task, progress, touched files, checkout anchors, validation, blockers, approvals, and next action with the current repository and conversation.
+3. Correct locally verifiable drift in the checkpoint. Never infer product intent, completion, approval, or review disposition from a clean worktree or checkpoint claim.
+4. If the branch, worktree, task, or an important unexplained change conflicts, stop and ask for direction. Otherwise continue from the next valid unfinished step.
+
+Validation is only considered current if no relevant code, tests, configuration, or generated behavior has changed since that validation was performed. Record the command, outcome, coverage, and repository state it validated. After a relevant change, mark the result historical or stale and rerun the required check before claiming completion; editing a timestamp or checkpoint field never makes an old result current.
+
+Mark the checkpoint `completed` only when the acceptance criteria are satisfied, appropriate validation is current, and no unresolved blocker or required approval remains. Record final checks and caveats. A completed checkpoint may remain until a later substantial task replaces it; never replace an active checkpoint for a different task without resolving the mismatch first. Do not introduce JSON, a state manager, locks, migrations, background work, or checkpoint commands.
+
 ## Handoff
 
 Always end with a portable Markdown handoff. When implementation is ready for review, report:
@@ -58,4 +78,4 @@ Always end with a portable Markdown handoff. When implementation is ready for re
 - any plan deviations, limitations, or unresolved concerns; and
 - the exact next action, normally `jstack-review`.
 
-The handoff must include the objective, criteria, decisions, completed and current work, relevant paths, checks, blockers, and one exact continuation action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and implementation base or diff anchor; explicitly mark any non-Git workspace. Keep it concise and local. Do not create hidden state or write a handoff file unless the user explicitly asks for one. Never call the whole task complete merely because code was written or a focused check passed.
+The handoff must include the objective, criteria, decisions, completed and current work, relevant paths, checks, blockers, and one exact continuation action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and implementation base or diff anchor; explicitly mark any non-Git workspace. Keep it concise and local. Before returning with unfinished substantial work, ensure `.jstack/checkpoint.md` contains the same current next action. Do not write any other hidden state or handoff file unless the user explicitly asks for one. Never call the whole task complete merely because code was written or a focused check passed.

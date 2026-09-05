@@ -89,10 +89,25 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 ## Workflow
 
 1. Invoke `jstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and returns a ready or blocked plan.
-2. Invoke `jstack-implement` with the ready plan or a precise implementation request. It makes only the authorized local changes and reports the checks it actually ran.
+2. Invoke `jstack-implement` with the ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored `.jstack/checkpoint.md` recovery snapshot while making the authorized local changes and running proportionate checks.
 3. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
 
-The skills exchange context through the conversation or a user-supplied Markdown handoff. Every phase returns a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. A non-Git workspace is marked explicitly. Skills treat handoffs as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence. They do not auto-discover state, write hidden files, maintain a machine-owned ledger, or promise recovery of unsaved reasoning.
+The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. Every phase returns a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. A non-Git workspace is marked explicitly. Skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
+
+## Checkpoint and resume
+
+During substantial implementation, JStack uses one human-readable recovery file:
+
+```text
+.jstack/
+  checkpoint.md
+```
+
+`.jstack/` is local workflow state and should normally be gitignored. The checkpoint records the current task, progress, decisions, touched files, validation, blockers, required approvals, checkout anchors, and one next action. It is updated at meaningful milestones rather than after every edit.
+
+Start work with the host's normal skill invocation, for example `/jstack-implement JIRA-123` in Claude Code or `$jstack-implement JIRA-123` in Codex. If the session ends before the work is complete, start a later session in the same worktree and invoke the implementation skill again without a new task, or say `Continue from the jstack checkpoint.` The agent reads `.jstack/checkpoint.md`, inspects current Git status and relevant files, reconciles any drift, and resumes from the next valid unfinished step.
+
+A checkpoint is a recovery aid, not a substitute for Git, source inspection, user approval, or validation. Validation is current only when no relevant implementation has changed since the check ran. See the [checkpoint protocol](policies/checkpoint-protocol.md) for the full lifecycle and schema.
 
 ## Shared engineering contract
 
