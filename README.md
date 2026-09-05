@@ -2,7 +2,7 @@
 
 JStack is a small collection of portable Markdown skills for planning, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JStack supplies the workflow instructions.
 
-JStack does not ship a user-facing executable, command parser, background service, checkpoint engine, or terminal interface. Using the skills does not require Node.js or a package installation.
+JStack does not ship a task runtime, command parser, background service, checkpoint engine, or terminal interface. Its only executable code is a tiny optional setup copier; using the skills does not require Node.js or a package installation.
 
 The workflow is an original implementation inspired by gstack's public product shape. JStack does not use gstack source code or setup scripts.
 
@@ -30,9 +30,59 @@ skills/
 
 There are no platform-specific copies. The same canonical folders are installed into every supported host.
 
-## Install through the agent host
+## Install - two simple modes
 
-Copy each complete `skills/<skill-name>/` folder into one of the host's native skill roots. Preserve the directory name and the `SKILL.md` file inside it.
+Like gstack, the easiest route is to paste an instruction into your coding agent. JStack has two deliberate setup modes for Claude Code, Codex, and Bob:
+
+- **Global** installs the skills once for your user account, available in every project.
+- **Local** copies the skills into the current repository so the project can carry its own JStack setup.
+
+The setup copier places only the three Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+
+### Global setup
+
+Paste this into the host you use:
+
+> Install JStack globally for this host: clone `https://github.com/JustinPrograms/jstack.git` into my personal JStack folder, then run its global setup for this host. Do not change my current project.
+
+```sh
+# Claude Code
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host claude --scope global
+
+# OpenAI Codex
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host codex --scope global
+
+# IBM Bob
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host bob --scope global
+```
+
+On Windows PowerShell:
+
+```powershell
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\\.jstack"; & "$HOME\\.jstack\\setup.ps1" -Host codex -Scope global
+```
+
+### Local setup
+
+From the repository that should receive JStack, paste this into the host you use:
+
+> Install JStack locally for this project using my JStack clone. Use the local setup for this host and change only this project's native skill folder.
+
+For example, in a Codex project after the initial clone:
+
+```sh
+sh ~/.jstack/setup --host codex --scope local
+```
+
+```powershell
+& "$HOME\\.jstack\\setup.ps1" -Host codex -Scope local
+```
+
+Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
+
+## Manual project install
+
+The setup command installs personal skills. To keep JStack in a particular repository for teammates, copy each complete `skills/<skill-name>/` folder into that host's project skill root. Preserve the directory name and the `SKILL.md` file inside it.
 
 | Host | Project skills | Personal skills |
 | --- | --- | --- |
@@ -42,7 +92,7 @@ Copy each complete `skills/<skill-name>/` folder into one of the host's native s
 
 This repository intentionally standardizes Codex on the `.agents/skills` project and personal roots shown above.
 
-### Claude Code
+### Project paths
 
 From the JStack repository root, install the three skill folders into the project:
 
@@ -53,25 +103,19 @@ cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .claude/sk
 
 Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-implement`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
 
-### OpenAI Codex
-
-From the JStack repository root, install the same folders into Codex's project skill root:
+For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
 cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .agents/skills/
 ```
 
-Start Codex in the project, open `/skills` to confirm they are available, then invoke `$jstack-plan`, `$jstack-implement`, or `$jstack-review`. To make the skills available in every project, use `~/.agents/skills/` as the destination instead. If a newly added skill does not appear, restart Codex.
+Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-implement`, or `$jstack-review`.
 
 On Windows PowerShell, use the equivalent commands below:
 
 ```powershell
-# Claude Code
-New-Item -ItemType Directory -Force .claude/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-implement, skills/jstack-review .claude/skills
-
-# OpenAI Codex
+# OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
 Copy-Item -Recurse skills/jstack-plan, skills/jstack-implement, skills/jstack-review .agents/skills
 ```
@@ -82,7 +126,7 @@ After copying the folders:
 - Bob Shell can select them through `/skills`.
 - Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-implement`, and `$jstack-review`.
 
-The descriptions also support automatic selection when the host enables it. No bootstrap command, launcher, shell-profile change, or generated configuration is part of installation.
+The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 
 Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), and the [Agent Skills specification](https://agentskills.io/specification).
 

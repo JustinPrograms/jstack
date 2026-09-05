@@ -1,0 +1,83 @@
+#!/bin/sh
+set -eu
+
+# Install JStack's portable Markdown skills into a host's global or local skill root.
+# This is deliberately only an installer: it does not run as part of JStack.
+
+usage() {
+  cat <<'EOF'
+Usage: ./setup --host <claude|codex|bob|all> --scope <global|local>
+
+Copies the JStack skills into the selected host's personal directory (`global`)
+or the current repository (`local`).
+No dependencies beyond a POSIX shell and standard file-copy tools are needed.
+EOF
+}
+
+host=""
+scope=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --host)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      host="$2"
+      shift 2
+      ;;
+    --scope)
+      [ "$#" -ge 2 ] || { usage >&2; exit 2; }
+      scope="$2"
+      shift 2
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+[ -n "$host" ] && [ -n "$scope" ] || { usage >&2; exit 2; }
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_root=$(pwd -P)
+
+install_to() {
+  destination="$1"
+  mkdir -p "$destination"
+  for skill in jstack-plan jstack-implement jstack-review; do
+    cp -R "$root/skills/$skill" "$destination/"
+  done
+  printf 'Installed JStack skills in %s\n' "$destination"
+}
+
+destination_for() {
+  selected_host="$1"
+  case "$scope:$selected_host" in
+    global:claude) printf '%s\n' "$HOME/.claude/skills" ;;
+    global:codex) printf '%s\n' "$HOME/.agents/skills" ;;
+    global:bob) printf '%s\n' "$HOME/.bob/skills" ;;
+    local:claude) printf '%s\n' "$project_root/.claude/skills" ;;
+    local:codex) printf '%s\n' "$project_root/.agents/skills" ;;
+    local:bob) printf '%s\n' "$project_root/.bob/skills" ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+[ "$scope" = "global" ] || [ "$scope" = "local" ] || { usage >&2; exit 2; }
+if [ "$scope" = "local" ] && [ "$project_root" = "$root" ]; then
+  echo "For a local install, run setup from the repository receiving JStack." >&2
+  exit 2
+fi
+
+case "$host" in
+  claude|codex|bob) install_to "$(destination_for "$host")" ;;
+  all)
+    for selected_host in claude codex bob; do
+      install_to "$(destination_for "$selected_host")"
+    done
+    ;;
+  *) usage >&2; exit 2 ;;
+esac

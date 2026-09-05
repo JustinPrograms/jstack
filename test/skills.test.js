@@ -158,11 +158,38 @@ test("documentation uses native host discovery paths", async () => {
   assert.match(readme, /\.bob\/skills/u);
   assert.match(readme, /<repo>\/\.agents\/skills\//u);
   assert.match(readme, /~\/\.agents\/skills\//u);
+  assert.match(readme, /Install JStack globally for this host/u);
+  assert.match(readme, /Install JStack locally for this project/u);
+  assert.match(readme, /github\.com\/JustinPrograms\/jstack\.git/u);
   assert.doesNotMatch(readme, /\.codex[\\/]skills/iu);
   assert.equal("bin" in packageJson, false);
   assert.deepEqual(packageJson.scripts, { test: "node --test" });
   assert.equal("bin" in packageLock.packages[""], false);
   assert.deepEqual(Object.keys(packageLock.packages), [""]);
+});
+
+test("optional setup copiers install only the canonical skills into host roots", async () => {
+  const [shellSetup, powerShellSetup] = await Promise.all([
+    readFile(path.join(root, "setup"), "utf8"),
+    readFile(path.join(root, "setup.ps1"), "utf8"),
+  ]);
+
+  for (const source of [shellSetup, powerShellSetup]) {
+    assert.match(source, /jstack-plan/u);
+    assert.match(source, /jstack-implement/u);
+    assert.match(source, /jstack-review/u);
+    assert.match(source, /\.claude[\\/]skills/u);
+    assert.match(source, /\.agents[\\/]skills/u);
+    assert.match(source, /\.bob[\\/]skills/u);
+  }
+
+  assert.match(shellSetup, /--host <claude\|codex\|bob\|all> --scope <global\|local>/u);
+  assert.match(shellSetup, /global:claude/u);
+  assert.match(shellSetup, /local:claude/u);
+  assert.match(powerShellSetup, /ValidateSet\("claude", "codex", "bob", "all"\)/u);
+  assert.match(powerShellSetup, /Alias\("Host"\)/u);
+  assert.match(powerShellSetup, /ValidateSet\("global", "local"\)/u);
+  assert.match(powerShellSetup, /Alias\("Scope"\)/u);
 });
 
 test("checkpoint recovery is Markdown-only, repository-reconciled, and validation-aware", async () => {
