@@ -3,6 +3,7 @@ dist/
 .gstack/
 .justin-stack/
 .story-stack/
+.worktree/
 coverage/
 *.log
 *.tsbuildinfo

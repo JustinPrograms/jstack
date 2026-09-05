@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SKILLS = ["story", "plan-eng-review", "justinstack-review", "resume-story"] as const;
+const SKILLS = ["story", "plan-eng-review", "implement-story", "justinstack-review", "resume-story"] as const;
 const OPTIONAL_FRONTMATTER = new Set(["license", "compatibility", "metadata", "allowed-tools"]);
 
 async function walk(directory: string): Promise<string[]> {
@@ -152,6 +152,42 @@ test("report-only review leaves checkpoint writes opt-in and recovery discloses 
   assert.match(resume, /not necessarily the moment the prior session ended/iu);
 });
 
+test("story composition keeps implementation, review, recovery, and completion ownership distinct", async () => {
+  const sources = await Promise.all(
+    ["story", "plan-eng-review", "implement-story", "justinstack-review", "resume-story"].map((skill) =>
+      readFile(path.join(PACKAGE_ROOT, "skills", skill, "SKILL.md"), "utf8"),
+    ),
+  );
+  const [story, planReview, implementation, review, resume] = sources as [string, string, string, string, string];
+
+  const phaseOrder = ["`plan-eng-review`", "`implement-story`", "`justinstack-review`"]
+    .map((phase) => story.indexOf(phase));
+  assert.equal(phaseOrder.every((index) => index >= 0), true);
+  assert.equal(phaseOrder[0]! < phaseOrder[1]! && phaseOrder[1]! < phaseOrder[2]!, true);
+  assert.match(story, /Do not reproduce their worker instructions here/iu);
+  assert.doesNotMatch(story, /workflow is planning-only|stop before implementation/iu);
+  assert.match(story, /material scope[\s\S]*first checkpoint the story as `blocked`/iu);
+  assert.match(story, /every blocker and should-fix finding is resolved/iu);
+
+  assert.match(planReview, /implementation action for `implement-story`/iu);
+  assert.match(implementation, /Plan approval and a request to resume are not by themselves authorization to edit source files/iu);
+  assert.match(implementation, /current repository as the source of truth/iu);
+  assert.match(implementation, /call sites[\s\S]*types, interfaces, tests/iu);
+  assert.match(implementation, /search for existing helpers/iu);
+  assert.match(implementation, /smallest coherent edit/iu);
+  assert.match(implementation, /minor implementation-level difference[\s\S]*material plan problem/iu);
+  assert.match(implementation, /implementation-time checks[\s\S]*final story validation/iu);
+  assert.match(implementation, /low-usage-compatible path is one coordinating coding agent/iu);
+  assert.match(implementation, /status `in-review`/iu);
+  assert.match(implementation, /Do not use `state complete`/iu);
+
+  assert.match(review, /reports findings and does not fix them|do not apply corrections/iu);
+  assert.match(review, /return a no-findings or fully dispositioned review to `story`/iu);
+  assert.match(resume, /state routing reconcile-resume/iu);
+  assert.match(resume, /use `implement-story` for `ready` or `in-progress` implementation/iu);
+  assert.match(resume, /return to the coordinating `story` workflow for final validation and completion gates/iu);
+});
+
 test("README documents platform-specific discovery and invocation without continuity overclaims", async () => {
   const readme = await readFile(path.join(PACKAGE_ROOT, "README.md"), "utf8");
   assert.match(readme, /<repo>\/\.agents\/skills\//u);
@@ -159,6 +195,7 @@ test("README documents platform-specific discovery and invocation without contin
   assert.doesNotMatch(readme, /\.codex\/skills\//u);
   assert.match(readme, /CLAUDE_CONFIG_DIR/u);
   assert.match(readme, /\$justinstack-review/u);
+  assert.match(readme, /\$implement-story/u);
   assert.match(readme, /In Bob Shell, type `\$` and select the skill from the picker/iu);
   assert.match(readme, /or use `\/skills`/iu);
   assert.match(readme, /state commands never launch user-supplied programs/iu);

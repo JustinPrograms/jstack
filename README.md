@@ -8,8 +8,9 @@ The workflow separation is an original implementation inspired by the public sha
 
 ## Included workflows
 
-- `story` turns supplied story text and local repository evidence into a scoped implementation plan. It does not edit application code.
+- `story` coordinates the end-to-end local lifecycle: discovery, planning, plan review, authorized implementation, independent review, final validation, and completion.
 - `plan-eng-review` reviews that plan interactively, one material decision at a time, and records an explicit approval gate. It does not edit application code.
+- `implement-story` executes an approved plan as the smallest correct local change, validates incrementally, and checkpoints a resumable handoff for independent review.
 - `justinstack-review` reports findings against the ticket, approved plan, repository conventions, and local diff. It is report-only; checkpoint writes and fixes each require separate authorization.
 - `resume-story` validates the latest successfully persisted state against Git, presents a compact recovery summary, and continues from the saved next action when still safe.
 
@@ -19,12 +20,13 @@ Invocation is platform-specific; the slash spelling is not portable:
 | --- | --- | --- | --- | --- |
 | `story` | `/story` | `/story` | type `$`, select `story`, or use `/skills` | `$story` or `/skills` |
 | `plan-eng-review` | `/plan-eng-review` | `/plan-eng-review` | type `$`, select `plan-eng-review`, or use `/skills` | `$plan-eng-review` or `/skills` |
+| `implement-story` | `/implement-story` | `/implement-story` | type `$`, select `implement-story`, or use `/skills` | `$implement-story` or `/skills` |
 | `justinstack-review` | `/justinstack-review` | `/justinstack-review` | type `$`, select `justinstack-review`, or use `/skills` | `$justinstack-review` or `/skills` |
 | `resume-story` | `/resume-story` | `/resume-story` | type `$`, select `resume-story`, or use `/skills` | `$resume-story` or `/skills` |
 
 Each platform can also select a skill automatically from its description, subject to that product's approval and invocation settings. The deliberately namespaced `justinstack-review` avoids the built-in `/review` commands in Claude Code, Bob, and Codex.
 
-Later Phase 2 slices remain deliberately unscaffolded: `implement`, `verify`, `address-review`, and `learn`.
+The composed story lifecycle is `story` discovery and drafting -> `plan-eng-review` -> `implement-story` -> `justinstack-review` -> authorized corrections when needed -> final validation and completion. Specialized verification, review-correction, and learning workflows remain deliberately unscaffolded.
 
 Canonical, platform-neutral skill content lives only here:
 

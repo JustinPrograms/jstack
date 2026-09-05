@@ -16,6 +16,7 @@ Before acting, resolve the JustinStack runtime home from the first non-empty val
 3. Read the selected bundle with `justinstack state show` before broad repository exploration.
 4. Run `state validate --json` with the same identity and repository arguments.
 5. Treat the result as current, stale but reconcilable, different branch, or missing required information under the shared protocol.
+6. Inspect advisory routing with `state routing inspect`. If a routing record exists, have the coordinating agent run `state routing reconcile-resume` before redispatch so interrupted `declared` tasks become `unknown-after-resume`. Do not initialize routing merely to resume a story.
 
 `--project` and `--ticket` are compatibility aliases for the canonical identity flags. Never choose a story from branch text alone.
 
@@ -37,7 +38,7 @@ An abrupt usage-limit cutoff cannot run a final save hook reliably. Only a bundl
 Derive the summary from the validated six-file bundle and current repository. Include:
 
 - objective and acceptance criteria;
-- non-goals and relevant files;
+- approved plan, non-goals, and relevant files;
 - decisions already made;
 - completed work and current work;
 - current local diff summary;
@@ -59,6 +60,15 @@ Continue only when validation and the active workflow make the saved next action
 - use current Git evidence instead of historical summaries; and
 - stop before any action the active skill or user request did not authorize.
 
+Resume through the skill that owns the persisted phase instead of recreating its instructions here:
+
+- use `story` for unfinished discovery or draft planning;
+- use `plan-eng-review` for unresolved plan decisions, approval, or a material plan correction;
+- use `implement-story` for `ready` or `in-progress` implementation only when the current request separately authorizes local source and test edits;
+- use `implement-story` for a `blocked` implementation only after current evidence resolves its non-plan blocker and the request authorizes continuation; route a material plan blocker to `plan-eng-review` instead;
+- use `justinstack-review` for independent inspection of an `in-review` change set, or `implement-story` for a separately authorized fix pass; and
+- return to the coordinating `story` workflow for final validation and completion gates.
+
 A request to resume does not authorize source edits, tests, staging, committing, or a remote action by itself. Never push or mutate a pull request, merge request, ticket system, code host, or other remote service. Read-only Git and remote retrieval remain allowed only within the shared protocol.
 
-If the next action crosses an approval gate or requires a product decision, ask before acting. Otherwise perform exactly that next authorized local action, update the bundle through the CLI, validate it, and report the new next action.
+If the next action crosses an approval gate or requires a product decision, ask before acting. Otherwise invoke or hand off to the owning skill for exactly that next authorized local action. Have the coordinating agent update the bundle through the CLI when semantic state changes, validate it, and report the new next action.

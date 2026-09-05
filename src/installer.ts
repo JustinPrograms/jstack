@@ -23,7 +23,13 @@ import { StoryStackError, errorMessage } from "./errors.js";
 export const INSTALL_MANIFEST_SCHEMA_VERSION = 2 as const;
 export const INSTALL_MANIFEST_FILENAME = "install-manifest.json";
 export const INSTALL_TRANSACTION_FILENAME = ".install-transaction.json";
-export const INSTALLED_SKILLS = ["story", "plan-eng-review", "justinstack-review", "resume-story"] as const;
+export const INSTALLED_SKILLS = [
+  "story",
+  "plan-eng-review",
+  "implement-story",
+  "justinstack-review",
+  "resume-story",
+] as const;
 
 export type InstalledSkill = (typeof INSTALLED_SKILLS)[number];
 export type InstallRoot = "justinstack" | "story-stack" | "claude-skills" | "bob-skills" | "codex-skills";
