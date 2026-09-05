@@ -17,12 +17,19 @@ test("staleness, refresh, validation freshness, and branch mismatches remain dis
   assert.equal((await store.validate(IDENTITY, fixture.root)).status, "current");
 
   await assert.rejects(store.snapshot(IDENTITY, fixture.root, { markValidated: true }), /successful current test/u);
-  const testUpdate = await store.update({
+  const planningCheckpoint = await store.load(IDENTITY);
+  await store.update({
     ...IDENTITY,
     repositoryPath: fixture.root,
-    section: "Test and validation results",
-    body: "- PASS: focused unit checks completed locally.",
-    markValidated: true,
+    body: planningCheckpoint.body,
+    status: "blocked",
+  });
+  const testUpdate = await store.recordValidation({
+    ...IDENTITY,
+    repositoryPath: fixture.root,
+    summary: "- PASS: focused unit checks completed locally.",
+    expectedWorktreeFingerprint: (await store.validate(IDENTITY, fixture.root)).currentSnapshot?.worktreeFingerprint ?? "",
+    confirmedSuccessful: true,
   });
   assert.equal(testUpdate.checkpoint.metadata.last_validation_fingerprint, testUpdate.checkpoint.metadata.worktree_fingerprint);
   assert.equal((await store.validate(IDENTITY, fixture.root)).validationIsCurrent, true);

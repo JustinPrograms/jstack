@@ -43,7 +43,15 @@ test("CLI lifecycle initializes, detects drift, refreshes, and produces a recove
   assert.match(JSON.parse(output.stdout[0] ?? "{}").path, /context\.md$/u);
   output = captureIo();
   assert.equal(await main(["state", "show", ...identity, "--json"], { ...common, io: output.io }), 0);
-  assert.equal(JSON.parse(output.stdout[0] ?? "{}").checkpoint.metadata.ticket_key, "DEMO-101");
+  const shownCheckpoint = JSON.parse(output.stdout[0] ?? "{}").checkpoint as { metadata: { ticket_key: string }; body: string };
+  assert.equal(shownCheckpoint.metadata.ticket_key, "DEMO-101");
+  const blockedBody = path.join(isolatedHome, "blocked-body.md");
+  await writeFile(blockedBody, shownCheckpoint.body, "utf8");
+  output = captureIo();
+  assert.equal(
+    await main(["state", "update", ...identity, "--body-file", blockedBody, "--status", "blocked"], { ...common, io: output.io }),
+    0,
+  );
   output = captureIo();
   assert.equal(
     await main(["state", "list", "--repo", fixture.root, "--json"], { ...common, io: output.io }),
@@ -54,17 +62,20 @@ test("CLI lifecycle initializes, detects drift, refreshes, and produces a recove
   const validationSummary = path.join(isolatedHome, "validation-summary.md");
   await writeFile(validationSummary, "- PASS: generic focused checks completed locally.\n", "utf8");
   output = captureIo();
+  assert.equal(await main(["state", "validate", ...identity, "--json"], { ...common, io: output.io }), 0);
+  const preValidationFingerprint = JSON.parse(output.stdout[0] ?? "{}").currentSnapshot.worktreeFingerprint as string;
+  output = captureIo();
   assert.equal(
     await main(
       [
         "state",
-        "update",
+        "record-validation",
         ...identity,
-        "--section",
-        "Test and validation results",
         "--body-file",
         validationSummary,
-        "--mark-validated",
+        "--expected-fingerprint",
+        preValidationFingerprint,
+        "--confirm-validation-succeeded",
       ],
       { ...common, io: output.io },
     ),

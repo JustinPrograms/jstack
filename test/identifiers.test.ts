@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import {
+  checkpointBundlePaths,
   checkpointPath,
+  repositoryIdentity,
   sanitizeProjectSlug,
   sanitizeTicketKey,
 } from "../src/checkpoint/identifiers.js";
@@ -23,12 +25,33 @@ test("path-like, traversal, and reserved identifiers are rejected before normali
 });
 
 test("checkpoint paths remain contained by the configured state root", () => {
-  const stateRoot = path.resolve("safe-state-root");
-  const result = checkpointPath(stateRoot, "sample-project", "DEMO-101");
-  const relative = path.relative(stateRoot, result);
+  const workspacesRoot = path.resolve("safe-workspaces-root");
+  const result = checkpointPath(workspacesRoot, "sample-project", "DEMO-101");
+  const relative = path.relative(workspacesRoot, result);
   assert.equal(path.isAbsolute(relative), false);
   assert.equal(relative.startsWith(".."), false);
-  assert.equal(relative, path.join("sample-project", "DEMO-101", "context.md"));
-  assert.throws(() => checkpointPath(stateRoot, "../outside", "DEMO-101"));
-  assert.throws(() => checkpointPath(stateRoot, "sample-project", "../DEMO-101"));
+  assert.equal(relative, path.join("sample-project", "stories", "DEMO-101", "context.md"));
+  const bundle = checkpointBundlePaths(workspacesRoot, "sample-project", "DEMO-101");
+  assert.deepEqual(
+    [bundle.context, bundle.decisions, bundle.progress, bundle.checks, bundle.handoff, bundle.state].map((item) =>
+      path.basename(item),
+    ),
+    ["context.md", "decisions.md", "progress.md", "checks.md", "handoff.md", "state.json"],
+  );
+  assert.equal(path.dirname(bundle.lock), path.dirname(bundle.directory));
+  assert.throws(() => checkpointPath(workspacesRoot, "../outside", "DEMO-101"));
+  assert.throws(() => checkpointPath(workspacesRoot, "sample-project", "../DEMO-101"));
+});
+
+test("repository identities are deterministic path-obscuring digests", () => {
+  const firstPath = path.resolve("repository-one");
+  const secondPath = path.resolve("repository-two");
+  const first = repositoryIdentity(firstPath);
+  assert.match(first, /^[a-f0-9]{64}$/u);
+  assert.equal(repositoryIdentity(firstPath), first);
+  assert.notEqual(repositoryIdentity(secondPath), first);
+  assert.equal(first.includes(path.basename(firstPath)), false);
+  if (process.platform === "win32") {
+    assert.equal(repositoryIdentity(firstPath.toUpperCase()), first);
+  }
 });

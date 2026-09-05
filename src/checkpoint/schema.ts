@@ -1,12 +1,13 @@
 import { StoryStackError } from "../errors.js";
 import path from "node:path";
 import {
+  LEGACY_SCHEMA_VERSION,
   SCHEMA_VERSION,
   TICKET_STATUSES,
   type CheckpointMetadata,
   type TicketStatus,
 } from "./types.js";
-import { assertProjectSlug, assertTicketKey } from "./identifiers.js";
+import { assertProjectSlug, assertTicketKey, repositoryIdentity } from "./identifiers.js";
 import { assertSafeBranchName } from "./branch.js";
 
 export const REQUIRED_SECTIONS = [
@@ -32,6 +33,25 @@ const METADATA_KEYS = [
   "schema_version",
   "project_slug",
   "ticket_key",
+  "repository_id",
+  "current_branch",
+  "base_branch",
+  "head_commit",
+  "worktree_fingerprint",
+  "ticket_status",
+  "created_at",
+  "updated_at",
+  "git_dirty",
+  "changed_file_count",
+  "untracked_file_count",
+  "last_validation_at",
+  "last_validation_fingerprint",
+] as const satisfies readonly (keyof CheckpointMetadata)[];
+
+const LEGACY_METADATA_KEYS = [
+  "schema_version",
+  "project_slug",
+  "ticket_key",
   "repository_path",
   "current_branch",
   "base_branch",
@@ -47,7 +67,7 @@ const METADATA_KEYS = [
   "untracked_file_count",
   "last_validation_at",
   "last_validation_fingerprint",
-] as const satisfies readonly (keyof CheckpointMetadata)[];
+] as const;
 
 export const METADATA_KEY_ORDER: readonly (keyof CheckpointMetadata)[] = METADATA_KEYS;
 
@@ -98,27 +118,36 @@ function assertFingerprint(value: string | null, key: string): void {
 }
 
 export function validateMetadata(record: Record<string, unknown>): CheckpointMetadata {
-  const unknown = Object.keys(record).filter((key) => !METADATA_KEYS.includes(key as keyof CheckpointMetadata));
+  const schemaVersion = record.schema_version;
+  if (schemaVersion !== SCHEMA_VERSION && schemaVersion !== LEGACY_SCHEMA_VERSION) {
+    throw new StoryStackError(
+      `Unsupported checkpoint schema '${String(schemaVersion)}'; expected ${LEGACY_SCHEMA_VERSION} or ${SCHEMA_VERSION}`,
+      "UNSUPPORTED_SCHEMA",
+    );
+  }
+  const expectedKeys: readonly string[] = schemaVersion === LEGACY_SCHEMA_VERSION ? LEGACY_METADATA_KEYS : METADATA_KEYS;
+  const unknown = Object.keys(record).filter((key) => !expectedKeys.includes(key));
   if (unknown.length > 0) {
     throw new StoryStackError(`Checkpoint has unknown metadata: ${unknown.join(", ")}`, "INVALID_CHECKPOINT");
   }
-  const missing = METADATA_KEYS.filter((key) => !(key in record));
+  const missing = expectedKeys.filter((key) => !(key in record));
   if (missing.length > 0) {
     throw new StoryStackError(`Checkpoint is missing metadata: ${missing.join(", ")}`, "INVALID_CHECKPOINT");
-  }
-  if (record.schema_version !== SCHEMA_VERSION) {
-    throw new StoryStackError(
-      `Unsupported checkpoint schema '${String(record.schema_version)}'; expected ${SCHEMA_VERSION}`,
-      "UNSUPPORTED_SCHEMA",
-    );
   }
   const projectSlug = requireString(record, "project_slug");
   const ticketKey = requireString(record, "ticket_key");
   assertProjectSlug(projectSlug);
   assertTicketKey(ticketKey);
-  const repositoryPath = requireString(record, "repository_path");
-  if (!pathIsAbsoluteNormalized(repositoryPath)) {
-    throw new StoryStackError("Checkpoint repository_path must be an absolute normalized path", "INVALID_CHECKPOINT");
+  let repositoryId: string;
+  if (schemaVersion === LEGACY_SCHEMA_VERSION) {
+    const repositoryPath = requireString(record, "repository_path");
+    if (!pathIsAbsoluteNormalized(repositoryPath)) {
+      throw new StoryStackError("Checkpoint repository_path must be an absolute normalized path", "INVALID_CHECKPOINT");
+    }
+    repositoryId = repositoryIdentity(repositoryPath);
+  } else {
+    repositoryId = requireString(record, "repository_id");
+    assertFingerprint(repositoryId, "repository_id");
   }
   const currentBranch = requireString(record, "current_branch");
   const baseBranch = requireString(record, "base_branch");
@@ -144,26 +173,25 @@ export function validateMetadata(record: Record<string, unknown>): CheckpointMet
   if (typeof record.git_dirty !== "boolean") {
     throw new StoryStackError("Checkpoint metadata 'git_dirty' must be a boolean", "INVALID_CHECKPOINT");
   }
-  const changedFiles = requireStringArray(record, "changed_file_summary");
-  if (!Number.isSafeInteger(record.changed_file_count) || (record.changed_file_count as number) < changedFiles.length) {
-    throw new StoryStackError(
-      "Checkpoint changed_file_count must be a non-negative integer at least as large as the stored summary",
-      "INVALID_CHECKPOINT",
-    );
+  const changedFiles = schemaVersion === LEGACY_SCHEMA_VERSION ? requireStringArray(record, "changed_file_summary") : [];
+  const untrackedFiles = schemaVersion === LEGACY_SCHEMA_VERSION ? requireStringArray(record, "untracked_files") : [];
+  if (
+    !Number.isSafeInteger(record.changed_file_count) ||
+    (record.changed_file_count as number) < 0 ||
+    (schemaVersion === LEGACY_SCHEMA_VERSION && (record.changed_file_count as number) < changedFiles.length)
+  ) {
+    throw new StoryStackError("Checkpoint changed_file_count must be a valid non-negative integer", "INVALID_CHECKPOINT");
   }
-  const untrackedFiles = requireStringArray(record, "untracked_files");
-  if (!Number.isSafeInteger(record.untracked_file_count) || (record.untracked_file_count as number) < untrackedFiles.length) {
-    throw new StoryStackError(
-      "Checkpoint untracked_file_count must be a non-negative integer at least as large as the stored name list",
-      "INVALID_CHECKPOINT",
-    );
+  if (
+    !Number.isSafeInteger(record.untracked_file_count) ||
+    (record.untracked_file_count as number) < 0 ||
+    (schemaVersion === LEGACY_SCHEMA_VERSION && (record.untracked_file_count as number) < untrackedFiles.length)
+  ) {
+    throw new StoryStackError("Checkpoint untracked_file_count must be a valid non-negative integer", "INVALID_CHECKPOINT");
   }
   if (
     record.git_dirty === false &&
-    (changedFiles.length > 0 ||
-      (record.changed_file_count as number) > 0 ||
-      untrackedFiles.length > 0 ||
-      (record.untracked_file_count as number) > 0)
+    ((record.changed_file_count as number) > 0 || (record.untracked_file_count as number) > 0)
   ) {
     throw new StoryStackError("A clean checkpoint cannot contain changed or untracked file metadata", "INVALID_CHECKPOINT");
   }
@@ -182,7 +210,7 @@ export function validateMetadata(record: Record<string, unknown>): CheckpointMet
     schema_version: SCHEMA_VERSION,
     project_slug: projectSlug,
     ticket_key: ticketKey,
-    repository_path: repositoryPath,
+    repository_id: repositoryId,
     current_branch: currentBranch,
     base_branch: baseBranch,
     head_commit: headCommit,
@@ -191,9 +219,7 @@ export function validateMetadata(record: Record<string, unknown>): CheckpointMet
     created_at: createdAt,
     updated_at: updatedAt,
     git_dirty: record.git_dirty,
-    changed_file_summary: changedFiles,
     changed_file_count: record.changed_file_count as number,
-    untracked_files: untrackedFiles,
     untracked_file_count: record.untracked_file_count as number,
     last_validation_at: lastValidationAt,
     last_validation_fingerprint: lastValidationFingerprint,
@@ -204,7 +230,7 @@ export function normalizeMarkdownBody(body: string): string {
   return `${body.replace(/\r\n?/g, "\n").trim()}\n`;
 }
 
-export function validateMarkdownBody(body: string): string {
+export function validatePrivacySafeMarkdown(body: string): string {
   const normalized = normalizeMarkdownBody(body);
   if (normalized.startsWith("---\n")) {
     throw new StoryStackError("Provide only the Markdown body; YAML frontmatter is engine-owned", "INVALID_CHECKPOINT");
@@ -230,6 +256,11 @@ export function validateMarkdownBody(body: string): string {
   if (Buffer.byteLength(normalized, "utf8") > 128 * 1024) {
     throw new StoryStackError("Checkpoint body exceeds the 128 KiB snapshot limit", "CHECKPOINT_TOO_LARGE");
   }
+  return normalized;
+}
+
+export function validateMarkdownBody(body: string): string {
+  const normalized = validatePrivacySafeMarkdown(body);
   let previousIndex = -1;
   const allowedHeadings = new Set<string>(REQUIRED_SECTIONS);
   const observedHeadings = [...normalized.matchAll(/^## (.+)$/gmu)].map((match) => match[1] ?? "");
