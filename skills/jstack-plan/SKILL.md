@@ -1,9 +1,9 @@
 ---
-name: justinstack-plan
+name: jstack-plan
 description: Plan a software change from a supplied task by inspecting the local repository, challenging scope and design, and producing an implementation-ready plan. Use for engineering discovery or planning; do not use to edit application code.
 ---
 
-# JustinStack Plan
+# JStack Plan
 
 Turn the user's task into the smallest implementation-ready plan that fits the repository. Work from the task text, current conversation, and local repository evidence. Do not retrieve a ticket or other remote context unless the user separately requests read-only retrieval and the environment permits it.
 
@@ -24,7 +24,7 @@ Read-only local Git inspection is allowed. Use read-only remote retrieval only w
 
 1. Identify every repository or worktree in scope, read its instructions, and inspect current Git status before broad exploration. If a workspace is not a Git repository, say so and use explicit filesystem evidence instead of inventing branch or diff state.
 2. Restate the objective in plain language. Extract testable acceptance criteria, constraints, dependencies, and explicit non-goals without inventing product requirements.
-3. If the user supplies a prior JustinStack handoff, treat it as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
+3. If the user supplies a prior JStack handoff, treat it as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
 4. Separate verified facts, reasonable assumptions, and questions. Ask only when an unanswered choice would materially change behavior, scope, or acceptance.
 
 ## Discover before designing
@@ -61,7 +61,7 @@ Return a concise plan with:
 - interfaces, data flow, error behavior, and compatibility constraints that matter;
 - a test matrix tied to acceptance criteria and regression risk;
 - decisions, assumptions, blockers, and deferred work; and
-- the exact first action for `justinstack-implement`.
+- the exact first action for `jstack-implement`.
 
 Use a small diagram only when relationships or state transitions would otherwise be hard to follow. Mark the plan `ready` only when no material question remains. A ready plan does not authorize implementation, staging, committing, or remote work.
 

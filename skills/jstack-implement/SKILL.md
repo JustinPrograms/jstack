@@ -1,9 +1,9 @@
 ---
-name: justinstack-implement
+name: jstack-implement
 description: Implement an explicitly requested software change or approved plan in a local repository, including focused tests and verification. Use when the user asks to implement or fix code; do not use for planning-only work, report-only review, Git history, or remote mutations.
 ---
 
-# JustinStack Implement
+# JStack Implement
 
 Implement the user's requested change as the smallest correct local patch that fits the repository. The active request must clearly ask for implementation; a saved plan or handoff by itself is context, not edit authority.
 
@@ -23,8 +23,8 @@ Read-only local Git inspection and relevant read-only retrieval are allowed when
 
 1. Identify every repository or worktree in scope, read its instructions, and record a pre-edit Git status and diff baseline. If a workspace is not a Git repository, say so and record the available filesystem or host change baseline.
 2. Use the plan, task, and current conversation to identify the objective, acceptance criteria, non-goals, constraints, and unresolved decisions.
-3. Treat a prior JustinStack handoff as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
-4. For a small, precise change, derive a short implementation checklist and proceed. For a material unresolved product or architecture choice, stop and route the task to `justinstack-plan`.
+3. Treat a prior JStack handoff as potentially stale. Compare its repository/worktree root and branch with the active checkout; stop for direction on a mismatch. Reconcile changed HEAD or base anchors from current evidence and treat old check results as historical.
+4. For a small, precise change, derive a short implementation checklist and proceed. For a material unresolved product or architecture choice, stop and route the task to `jstack-plan`.
 5. Confirm that the requested work does not include a remote mutation or an unrequested Git-history change.
 
 ## Inspect before editing
@@ -43,7 +43,7 @@ Work in coherent, reviewable units:
 4. Run the narrowest relevant check, then broaden verification in proportion to the change and repository guidance.
 5. Recheck Git status and the complete task diff for accidental or unrelated changes.
 
-Do not future-proof without evidence, introduce a second implementation of an existing rule, or broaden the task for opportunistic cleanup. If current evidence invalidates a material part of the plan, preserve safe completed work, explain the conflict, and request a revised decision through `justinstack-plan` instead of inventing around it.
+Do not future-proof without evidence, introduce a second implementation of an existing rule, or broaden the task for opportunistic cleanup. If current evidence invalidates a material part of the plan, preserve safe completed work, explain the conflict, and request a revised decision through `jstack-plan` instead of inventing around it.
 
 Delegation is optional. Use it only for bounded, non-overlapping investigation or verification when the host supports it; the coordinating agent owns the final edits, integration decisions, and report.
 
@@ -56,6 +56,6 @@ Always end with a portable Markdown handoff. When implementation is ready for re
 - checks actually run and their outcomes;
 - checks not run and why;
 - any plan deviations, limitations, or unresolved concerns; and
-- the exact next action, normally `justinstack-review`.
+- the exact next action, normally `jstack-review`.
 
 The handoff must include the objective, criteria, decisions, completed and current work, relevant paths, checks, blockers, and one exact continuation action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and implementation base or diff anchor; explicitly mark any non-Git workspace. Keep it concise and local. Do not create hidden state or write a handoff file unless the user explicitly asks for one. Never call the whole task complete merely because code was written or a focused check passed.

@@ -31,6 +31,7 @@ There is no standing authorization to write Git history or mutate a remote. A re
 
 - Never run `git push` or mutate a remote repository, pull request, merge request, ticket, or other remote service unless the user explicitly authorizes that exact remote action in the current conversation.
 - Treat each remote action as distinct approval: authorization to push does not authorize creating a pull request; authorization to create a pull request does not authorize approving, merging, closing, or deleting it; and authorization to approve does not authorize merging.
+- For explicitly authorized GitHub actions, prefer the `gh` CLI available on `PATH`; use a connector or browser only if `gh` is unavailable or cannot complete the requested action.
 - Stage or commit only when the user explicitly requests that exact local Git action in the current conversation.
 - If a commit is explicitly requested, use a concise conventional message, stage only intentional files, and inspect the exact staged diff first.
 - Report the worktree path, branch, changed files, checks run, checks not run, and any remote action performed under explicit approval.
@@ -48,6 +49,6 @@ git worktree prune
 
 Leave the branch intact unless the user separately asks to remove it after verifying it is no longer needed.
 
-## JustinStack-specific guidance
+## JStack-specific guidance
 
 The product's shipped skills have their own safety contract. Do not change their canonical policy merely to accommodate this contributor workflow. This file governs repository-maintenance agents acting under the owner's explicit authorization; installed end-user workflows must retain their documented safety guarantees.

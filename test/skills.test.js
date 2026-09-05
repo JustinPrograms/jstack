@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedSkills = [
-  "justinstack-implement",
-  "justinstack-plan",
-  "justinstack-review",
+  "jstack-implement",
+  "jstack-plan",
+  "jstack-review",
 ];
 
 async function pathExists(relativePath) {
@@ -83,9 +83,9 @@ test("ships exactly three canonical Markdown skills", async () => {
 test("skill packages do not depend on the retired executable architecture", async () => {
   const forbidden = [
     /dist[\\/]src[\\/]cli/iu,
-    /bin[\\/]justinstack/iu,
-    /\bjustinstack\s+(?:install|uninstall|doctor|state|safety)\b/iu,
-    /\b(?:JUSTINSTACK_HOME|JUSTIN_STACK_HOME|STORY_STACK_HOME)\b/u,
+    /bin[\\/]jstack/iu,
+    /\bjstack\s+(?:install|uninstall|doctor|state|safety)\b/iu,
+    /\b(?:JSTACK_HOME|JSTACK_HOME|STORY_STACK_HOME)\b/u,
     /\brouting\.json\b/iu,
   ];
 
@@ -138,14 +138,14 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
     assert.match(source, /explicitly mark any non-Git workspace/u, `${name} must support non-Git work`);
   }
 
-  assert.match(skills["justinstack-plan"], /Keep this workflow read-only/u);
-  assert.match(skills["justinstack-implement"], /must clearly ask for implementation/u);
-  assert.match(skills["justinstack-implement"], /request to implement or fix authorizes/u);
-  assert.match(skills["justinstack-implement"], /pre-edit Git status and diff baseline/u);
-  assert.match(skills["justinstack-implement"], /Never use `git reset`, `git checkout`, `git clean`/u);
-  assert.match(skills["justinstack-review"], /Report findings only/u);
-  assert.match(skills["justinstack-review"], /committed branch changes from the chosen merge base/u);
-  assert.match(skills["justinstack-review"], /no reliable base exists/u);
+  assert.match(skills["jstack-plan"], /Keep this workflow read-only/u);
+  assert.match(skills["jstack-implement"], /must clearly ask for implementation/u);
+  assert.match(skills["jstack-implement"], /request to implement or fix authorizes/u);
+  assert.match(skills["jstack-implement"], /pre-edit Git status and diff baseline/u);
+  assert.match(skills["jstack-implement"], /Never use `git reset`, `git checkout`, `git clean`/u);
+  assert.match(skills["jstack-review"], /Report findings only/u);
+  assert.match(skills["jstack-review"], /committed branch changes from the chosen merge base/u);
+  assert.match(skills["jstack-review"], /no reliable base exists/u);
 });
 
 test("documentation uses native host discovery paths", async () => {

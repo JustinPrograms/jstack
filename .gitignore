@@ -1,7 +1,7 @@
 node_modules/
 # Retired local-state paths stay ignored so pre-existing private data is not committed.
 .gstack/
-.justin-stack/
+.jstack/
 .story-stack/
 .worktree/
 coverage/

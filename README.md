@@ -1,30 +1,30 @@
-# JustinStack
+# JStack
 
-JustinStack is a small collection of portable Markdown skills for planning, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JustinStack supplies the workflow instructions.
+JStack is a small collection of portable Markdown skills for planning, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JStack supplies the workflow instructions.
 
-JustinStack does not ship a user-facing executable, command parser, background service, checkpoint engine, or terminal interface. Using the skills does not require Node.js or a package installation.
+JStack does not ship a user-facing executable, command parser, background service, checkpoint engine, or terminal interface. Using the skills does not require Node.js or a package installation.
 
-The workflow is an original implementation inspired by gstack's public product shape. JustinStack does not use gstack source code or setup scripts.
+The workflow is an original implementation inspired by gstack's public product shape. JStack does not use gstack source code or setup scripts.
 
 ## Skills
 
 | Skill | Purpose | Default effect |
 | --- | --- | --- |
-| `justinstack-plan` | Inspect a task and repository, challenge scope, and produce an implementation-ready plan. | Read-only |
-| `justinstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
-| `justinstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
+| `jstack-plan` | Inspect a task and repository, challenge scope, and produce an implementation-ready plan. | Read-only |
+| `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
+| `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
 
-The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `justinstack-review` remain selectable without replacing a built-in command.
+The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
 Each skill is a complete Agent Skills directory with portable `name` and `description` frontmatter:
 
 ```text
 skills/
-  justinstack-plan/
+  jstack-plan/
     SKILL.md
-  justinstack-implement/
+  jstack-implement/
     SKILL.md
-  justinstack-review/
+  jstack-review/
     SKILL.md
 ```
 
@@ -44,9 +44,9 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 After copying the folders:
 
-- Claude Code and Bob IDE expose the skills as `/justinstack-plan`, `/justinstack-implement`, and `/justinstack-review`.
+- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-implement`, and `/jstack-review`.
 - Bob Shell can select them through `/skills`.
-- Codex can select them through `/skills` or mention them as `$justinstack-plan`, `$justinstack-implement`, and `$justinstack-review`.
+- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-implement`, and `$jstack-review`.
 
 The descriptions also support automatic selection when the host enables it. No bootstrap command, launcher, shell-profile change, or generated configuration is part of installation.
 
@@ -54,9 +54,9 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 
 ## Workflow
 
-1. Invoke `justinstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and returns a ready or blocked plan.
-2. Invoke `justinstack-implement` with the ready plan or a precise implementation request. It makes only the authorized local changes and reports the checks it actually ran.
-3. Invoke `justinstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `justinstack-implement`.
+1. Invoke `jstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and returns a ready or blocked plan.
+2. Invoke `jstack-implement` with the ready plan or a precise implementation request. It makes only the authorized local changes and reports the checks it actually ran.
+3. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
 
 The skills exchange context through the conversation or a user-supplied Markdown handoff. Every phase returns a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. A non-Git workspace is marked explicitly. Skills treat handoffs as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence. They do not auto-discover state, write hidden files, maintain a machine-owned ledger, or promise recovery of unsaved reasoning.
 
