@@ -65,4 +65,6 @@ Return a concise plan with:
 
 Use a small diagram only when relationships or state transitions would otherwise be hard to follow. Mark the plan `ready` only when no material question remains. A ready plan does not authorize implementation, staging, committing, or remote work.
 
-Always finish with a portable Markdown handoff containing the objective, criteria, plan status, decisions, relevant paths, checks already run, blockers, and exact next skill or action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and planning base or diff anchor; explicitly mark any non-Git workspace. Keep the handoff concise and local. Do not create hidden state or write a handoff file unless the user explicitly asks for one.
+Planning does not create or update `.jstack/checkpoint.md`. Make the plan handoff easy for `jstack-implement` to use as the initial checkpoint: include the task, objective, criteria, ordered progress checklist, decisions, relevant paths, blockers, required approvals, and exact first action without duplicating unnecessary discovery detail.
+
+Always finish with a portable Markdown handoff containing the objective, criteria, plan status, decisions, relevant paths, checks already run, blockers, and exact next skill or action. Include each canonical repository or worktree root, current branch or detached state, HEAD, and planning base or diff anchor; explicitly mark any non-Git workspace. Keep the handoff concise and local. Do not write a plan or handoff file unless the user explicitly asks for one.
