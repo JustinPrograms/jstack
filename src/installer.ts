@@ -27,12 +27,12 @@ export const INSTALLED_SKILLS = [
   "story",
   "plan-eng-review",
   "implement-story",
-  "justinstack-review",
+  "jstack-review",
   "resume-story",
 ] as const;
 
 export type InstalledSkill = (typeof INSTALLED_SKILLS)[number];
-export type InstallRoot = "justinstack" | "story-stack" | "claude-skills" | "bob-skills" | "codex-skills";
+export type InstallRoot = "jstack" | "story-stack" | "claude-skills" | "bob-skills" | "codex-skills";
 export type InstallEntryKind = "copy" | "generated" | "manifest" | "obsolete";
 export type CollisionKind = "file" | "directory" | "symbolic-link" | "other";
 export type InstallAction = "create" | "unchanged" | "replace" | "remove" | "preserve" | "unsafe";
@@ -42,9 +42,9 @@ export interface InstallerOptions {
   packageRoot?: string;
   /** Isolated home override, primarily for tests. */
   userHome?: string;
-  /** Shared runtime and private-state root. Defaults to <userHome>/.justin-stack. */
-  justinStackHome?: string;
-  /** Deprecated compatibility alias for justinStackHome. */
+  /** Shared runtime and private-state root. Defaults to <userHome>/.jstack. */
+  jstackHome?: string;
+  /** Deprecated compatibility alias for jstackHome. */
   storyStackHome?: string;
   target?: TargetSelection;
   scope?: InstallScope;
@@ -80,8 +80,8 @@ export interface ApplyInstallOptions {
 export interface InstallPaths {
   userHome: string;
   projectRoot: string;
-  justinRoot: string;
-  /** Deprecated descriptive alias for justinRoot. */
+  jstackRoot: string;
+  /** Deprecated descriptive alias for jstackRoot. */
   storyRoot: string;
   skillsRoot: string;
   skillRoots: Partial<Record<PlatformTarget, string>>;
@@ -179,7 +179,7 @@ interface NormalizedInstallerOptions {
   packageRoot: string;
   packageVersion: string;
   userHome: string;
-  justinStackHome: string;
+  jstackHome: string;
   target: TargetSelection;
   scope: InstallScope;
   projectRoot: string;
@@ -196,7 +196,7 @@ export interface InstallPlan {
   target: TargetSelection;
   targets: readonly PlatformTarget[];
   scope: InstallScope;
-  justinRoot: string;
+  jstackRoot: string;
   /** Deprecated alias retained for callers of the Phase 1 API. */
   storyRoot: string;
   skillsRoot: string;
@@ -254,7 +254,7 @@ export interface UninstallPlan {
   projectRoot: string;
   target: TargetSelection;
   scope: InstallScope;
-  justinRoot: string;
+  jstackRoot: string;
   storyRoot: string;
   skillsRoot: string;
   skillRoots: Partial<Record<PlatformTarget, string>>;
@@ -343,7 +343,7 @@ interface InstallTransactionJournal {
   pid: number;
   user_home: string;
   project_root: string;
-  justin_root: string;
+  jstack_root: string;
   plan_fingerprint: string;
   manifest_path: string;
   manifest_before_sha256: string | null;
@@ -354,7 +354,7 @@ interface InstallTransactionJournal {
   entries: InstallTransactionEntry[];
 }
 
-type InstallTransactionPaths = Pick<InstallPaths, "userHome" | "projectRoot" | "justinRoot" | "manifestPath">;
+type InstallTransactionPaths = Pick<InstallPaths, "userHome" | "projectRoot" | "jstackRoot" | "manifestPath">;
 
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_TRANSACTION_BYTES = 4 * 1024 * 1024;
@@ -481,7 +481,7 @@ export function resolveInstallPaths(
   userHome = os.homedir(),
   overrides: Pick<
     InstallerOptions,
-    | "justinStackHome"
+    | "jstackHome"
     | "storyStackHome"
     | "claudeSkillsRoot"
     | "bobSkillsRoot"
@@ -499,9 +499,9 @@ export function resolveInstallPaths(
   const scope = overrides.scope ?? "global";
   const target = overrides.target ?? "claude";
   const targets = expandPlatformTargets(target);
-  const justinRoot = assertUsableRoot(
-    overrides.justinStackHome ?? overrides.storyStackHome ?? path.join(resolvedHome, ".justin-stack"),
-    "JustinStack home",
+  const jstackRoot = assertUsableRoot(
+    overrides.jstackHome ?? overrides.storyStackHome ?? path.join(resolvedHome, ".jstack"),
+    "JStack home",
   );
   const claudeConfigDir = overrides.claudeConfigDir === undefined
     ? null
@@ -515,7 +515,7 @@ export function resolveInstallPaths(
     const context: AdapterPaths = {
       userHome: resolvedHome,
       projectRoot,
-      justinStackHome: justinRoot,
+      jstackHome: jstackRoot,
       ...(claudeConfigDir === null ? {} : { claudeConfigDir }),
       ...(codexHome === null ? {} : { codexHome }),
     };
@@ -524,7 +524,7 @@ export function resolveInstallPaths(
       `${platform} skills root`,
     );
     const skillsRoot = skillRoots[platform];
-    if (skillsRoot !== undefined && (isContained(justinRoot, skillsRoot) || isContained(skillsRoot, justinRoot))) {
+    if (skillsRoot !== undefined && (isContained(jstackRoot, skillsRoot) || isContained(skillsRoot, jstackRoot))) {
       throw new StoryStackError("Runtime and skill roots cannot overlap", "INVALID_INSTALL_ROOT");
     }
     const scopeBoundary = scope === "global" ? resolvedHome : projectRoot;
@@ -544,13 +544,13 @@ export function resolveInstallPaths(
   return {
     userHome: resolvedHome,
     projectRoot,
-    justinRoot,
-    storyRoot: justinRoot,
+    jstackRoot,
+    storyRoot: jstackRoot,
     skillsRoot: firstRoot,
     skillRoots,
     claudeConfigDir,
     codexHome,
-    manifestPath: path.join(justinRoot, INSTALL_MANIFEST_FILENAME),
+    manifestPath: path.join(jstackRoot, INSTALL_MANIFEST_FILENAME),
   };
 }
 
@@ -562,8 +562,8 @@ function safetyRootFor(paths: Pick<InstallPaths, "userHome" | "projectRoot">, de
   return destinationRoot;
 }
 
-function installerLockPath(justinRoot: string): string {
-  return path.join(path.dirname(justinRoot), `.${path.basename(justinRoot)}.installer.lock`);
+function installerLockPath(jstackRoot: string): string {
+  return path.join(path.dirname(jstackRoot), `.${path.basename(jstackRoot)}.installer.lock`);
 }
 
 interface InstallerLockMetadata {
@@ -755,7 +755,7 @@ interface InstallerLockLease {
 }
 
 async function acquireInstallerLock(paths: InstallPaths): Promise<InstallerLockLease> {
-  const lockPath = installerLockPath(paths.justinRoot);
+  const lockPath = installerLockPath(paths.jstackRoot);
   const lockParent = path.dirname(lockPath);
   const safetyRoot = isContained(paths.userHome, lockPath) ? paths.userHome : lockParent;
   const issue = await inspectParentSafety(safetyRoot, lockPath);
@@ -786,7 +786,7 @@ async function acquireInstallerLock(paths: InstallPaths): Promise<InstallerLockL
       }
       await delay(INSTALL_LOCK_DELAY_MS);
     }
-    throw new StoryStackError(`Another JustinStack install or uninstall still holds the local lock: ${lockPath}`, "INSTALL_LOCKED");
+    throw new StoryStackError(`Another JStack install or uninstall still holds the local lock: ${lockPath}`, "INSTALL_LOCKED");
   } catch (error) {
     await removeOwnedInstallerLease(ticketPath ?? choosingPath, token).catch(() => undefined);
     throw error;
@@ -826,7 +826,7 @@ function assertManifestRelativePath(relativePath: unknown): asserts relativePath
 function isRuntimePath(relativePath: string): boolean {
   const skillNames = CURRENT_AND_LEGACY_SKILLS.join("|");
   return (
-    /^(?:bin\/(?:justinstack|story-stack)(?:\.js|\.cmd)?|runtime\/package\.json|runtime\/templates\/context\.v1\.md|runtime\/policies\/checkpoint-protocol\.md|policies\/checkpoint-protocol\.md)$/u.test(relativePath) ||
+    /^(?:bin\/(?:jstack|story-stack)(?:\.js|\.cmd)?|runtime\/package\.json|runtime\/templates\/context\.v1\.md|runtime\/policies\/checkpoint-protocol\.md|policies\/checkpoint-protocol\.md)$/u.test(relativePath) ||
     new RegExp(`^runtime/skills/(?:${skillNames})/(?:SKILL\\.md|(?:references|scripts|assets)/(?:[^/]+/)*[^/]+)$`, "u").test(relativePath) ||
     /^runtime\/dist\/(?:src|adapters)\/(?:[^/]+\/)*[^/]+\.js$/u.test(relativePath)
   );
@@ -1268,7 +1268,7 @@ function nodeLauncher(): string {
   return `#!/usr/bin/env node
 async function run() {
   const cli = await import("../runtime/dist/src/cli.js");
-  if (typeof cli.main !== "function") throw new Error("Installed JustinStack CLI does not export main()");
+  if (typeof cli.main !== "function") throw new Error("Installed JStack CLI does not export main()");
   process.exitCode = await cli.main(process.argv.slice(2));
 }
 
@@ -1279,7 +1279,7 @@ run().catch((error) => {
 `;
 }
 
-function windowsLauncher(command: "justinstack" | "story-stack"): string {
+function windowsLauncher(command: "jstack" | "story-stack"): string {
   return `@echo off\r
 node "%~dp0${command}.js" %*\r
 exit /b %errorlevel%\r
@@ -1287,7 +1287,7 @@ exit /b %errorlevel%\r
 }
 
 function runtimePackage(version: string): string {
-  return `${JSON.stringify({ name: "justinstack-installed-runtime", version, private: true, type: "module" }, null, 2)}\n`;
+  return `${JSON.stringify({ name: "jstack-installed-runtime", version, private: true, type: "module" }, null, 2)}\n`;
 }
 
 async function readExistingManifest(manifestPath: string, safetyRoot: string): Promise<ExistingManifest | null> {
@@ -1420,7 +1420,7 @@ async function normalizeOptions(options: InstallerOptions): Promise<NormalizedIn
   const scope = options.scope ?? "global";
   const projectRoot = options.projectRoot ?? await enclosingGitRoot(options.cwd ?? process.cwd());
   const paths = resolveInstallPaths(options.userHome ?? os.homedir(), {
-    ...(options.justinStackHome === undefined ? {} : { justinStackHome: options.justinStackHome }),
+    ...(options.jstackHome === undefined ? {} : { jstackHome: options.jstackHome }),
     ...(options.storyStackHome === undefined ? {} : { storyStackHome: options.storyStackHome }),
     projectRoot,
     ...(options.claudeSkillsRoot === undefined ? {} : { claudeSkillsRoot: options.claudeSkillsRoot }),
@@ -1436,7 +1436,7 @@ async function normalizeOptions(options: InstallerOptions): Promise<NormalizedIn
     packageRoot,
     packageVersion,
     userHome: paths.userHome,
-    justinStackHome: paths.justinRoot,
+    jstackHome: paths.jstackRoot,
     target,
     scope,
     projectRoot: paths.projectRoot,
@@ -1448,7 +1448,7 @@ async function normalizeOptions(options: InstallerOptions): Promise<NormalizedIn
 
 function runtimeDescriptors(
   packageRoot: string,
-  justinRoot: string,
+  jstackRoot: string,
   safetyRoot: string,
   version: string,
 ): Promise<FileDescriptor[]> {
@@ -1461,8 +1461,8 @@ function runtimeDescriptors(
       for (const sourcePath of await listRegularFiles(compiledRoot, true)) {
         if (!sourcePath.endsWith(".js")) continue;
         descriptors.push({
-          root: "justinstack",
-          destinationRoot: justinRoot,
+          root: "jstack",
+          destinationRoot: jstackRoot,
           safetyRoot,
           relativePath: `${relativeRoot}/${normalizeRelativePath(path.relative(compiledRoot, sourcePath))}`,
           kind: "copy",
@@ -1479,8 +1479,8 @@ function runtimeDescriptors(
       ["policies/checkpoint-protocol.md", path.join(packageRoot, "policies", "checkpoint-protocol.md")],
     ] as const) {
       descriptors.push({
-        root: "justinstack",
-        destinationRoot: justinRoot,
+        root: "jstack",
+        destinationRoot: jstackRoot,
         safetyRoot,
         relativePath,
         kind: "copy",
@@ -1495,8 +1495,8 @@ function runtimeDescriptors(
       for (const sourcePath of await skillPackageFiles(packageRoot, skill)) {
         const child = normalizeRelativePath(path.relative(sourceRoot, sourcePath));
         descriptors.push({
-          root: "justinstack",
-          destinationRoot: justinRoot,
+          root: "jstack",
+          destinationRoot: jstackRoot,
           safetyRoot,
           relativePath: `runtime/skills/${skill}/${child}`,
           kind: "copy",
@@ -1509,16 +1509,16 @@ function runtimeDescriptors(
     }
     for (const [relativePath, contents, mode] of [
       ["runtime/package.json", runtimePackage(version), 0o644],
-      ["bin/justinstack.js", nodeLauncher(), 0o755],
-      ["bin/justinstack", nodeLauncher(), 0o755],
-      ["bin/justinstack.cmd", windowsLauncher("justinstack"), 0o644],
+      ["bin/jstack.js", nodeLauncher(), 0o755],
+      ["bin/jstack", nodeLauncher(), 0o755],
+      ["bin/jstack.cmd", windowsLauncher("jstack"), 0o644],
       ["bin/story-stack.js", nodeLauncher(), 0o755],
       ["bin/story-stack", nodeLauncher(), 0o755],
       ["bin/story-stack.cmd", windowsLauncher("story-stack"), 0o644],
     ] as const) {
       descriptors.push({
-        root: "justinstack",
-        destinationRoot: justinRoot,
+        root: "jstack",
+        destinationRoot: jstackRoot,
         safetyRoot,
         relativePath,
         kind: "generated",
@@ -1582,7 +1582,7 @@ function ownershipMap(
   const owned = new Map<string, string>();
   if (manifest === null) return owned;
   for (const entry of manifest.runtime_entries) {
-    owned.set(path.resolve(nativePath(paths.justinRoot, entry.path)), entry.sha256);
+    owned.set(path.resolve(nativePath(paths.jstackRoot, entry.path)), entry.sha256);
   }
   for (const installation of manifest.installations) {
     if (installation.destination_root === null) continue;
@@ -1598,7 +1598,7 @@ async function materializeDescriptor(
   owned: Map<string, string>,
 ): Promise<InstallPlanEntry> {
   assertManifestRelativePath(descriptor.relativePath);
-  if (descriptor.root === "justinstack" ? !isRuntimePath(descriptor.relativePath) : !isSkillPath(descriptor.relativePath)) {
+  if (descriptor.root === "jstack" ? !isRuntimePath(descriptor.relativePath) : !isSkillPath(descriptor.relativePath)) {
     throw new StoryStackError(`Installer target is not allowlisted: ${descriptor.relativePath}`, "UNSAFE_INSTALL_TARGET");
   }
   const targetPath = path.resolve(nativePath(descriptor.destinationRoot, descriptor.relativePath));
@@ -1724,7 +1724,7 @@ async function planBackupOperations(
     after: entry.sha256,
     action: entry.action,
   })))).slice(0, 20);
-  const backupRoot = path.join(paths.justinRoot, "backups", `install-${setId}`);
+  const backupRoot = path.join(paths.jstackRoot, "backups", `install-${setId}`);
   const backupOperations: InstallBackupOperation[] = [];
   for (const [index, entry] of replacing.entries()) {
     const previousSha256 = entry.previousSha256;
@@ -1733,8 +1733,8 @@ async function planBackupOperations(
       backupRoot,
       `${String(index).padStart(4, "0")}-${digest(entry.targetPath).slice(0, 12)}-${path.basename(entry.targetPath)}`,
     );
-    assertContained(paths.justinRoot, targetPath, "Backup target");
-    const parentIssue = await inspectParentSafety(safetyRootFor(paths, paths.justinRoot), targetPath);
+    assertContained(paths.jstackRoot, targetPath, "Backup target");
+    const parentIssue = await inspectParentSafety(safetyRootFor(paths, paths.jstackRoot), targetPath);
     const collision = parentIssue === null ? await inspectCollision(targetPath) : null;
     const reusable = collision?.kind === "file" && collision.sha256 === previousSha256;
     const action: InstallBackupAction = parentIssue !== null || (collision !== null && !reusable)
@@ -1780,7 +1780,7 @@ function planFingerprint(
 export async function planInstall(options: InstallerOptions = {}): Promise<InstallPlan> {
   const normalized = await normalizeOptions(options);
   const paths = resolveInstallPaths(normalized.userHome, {
-    justinStackHome: normalized.justinStackHome,
+    jstackHome: normalized.jstackHome,
     projectRoot: normalized.projectRoot,
     target: normalized.target,
     scope: normalized.scope,
@@ -1790,7 +1790,7 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
   });
   const safetyIssues: InstallSafetyIssue[] = [];
   let existing: ExistingManifest | null = null;
-  const manifestSafetyRoot = safetyRootFor(paths, paths.justinRoot);
+  const manifestSafetyRoot = safetyRootFor(paths, paths.jstackRoot);
   const manifestParentIssue = await inspectParentSafety(manifestSafetyRoot, paths.manifestPath);
   if (manifestParentIssue !== null) {
     safetyIssues.push({ targetPath: paths.manifestPath, message: manifestParentIssue });
@@ -1811,8 +1811,8 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
   const owned = ownershipMap(existingV2, paths);
   const descriptors = await runtimeDescriptors(
     normalized.packageRoot,
-    paths.justinRoot,
-    safetyRootFor(paths, paths.justinRoot),
+    paths.jstackRoot,
+    safetyRootFor(paths, paths.jstackRoot),
     normalized.packageVersion,
   );
   for (const target of expandPlatformTargets(normalized.target)) {
@@ -1832,16 +1832,16 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
   const entries: InstallPlanEntry[] = [];
   for (const descriptor of descriptors) entries.push(await materializeDescriptor(descriptor, owned));
 
-  const currentRuntimeEntries = entries.filter((entry) => entry.root === "justinstack");
+  const currentRuntimeEntries = entries.filter((entry) => entry.root === "jstack");
   const currentRuntimeManifest = ownedManifestFilesAfterApply(currentRuntimeEntries);
   const currentRuntimePaths = new Set(currentRuntimeManifest.map((entry) => entry.path));
   const preservedRuntime: ManifestFileEntry[] = [];
   for (const prior of existingV2?.runtime_entries ?? []) {
     if (currentRuntimePaths.has(prior.path)) continue;
     const obsolete = await materializeObsolete(
-      "justinstack",
-      paths.justinRoot,
-      safetyRootFor(paths, paths.justinRoot),
+      "jstack",
+      paths.jstackRoot,
+      safetyRootFor(paths, paths.jstackRoot),
       prior,
       null,
     );
@@ -1926,9 +1926,9 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     }
   }
   entries.push({
-    root: "justinstack",
-    destinationRoot: paths.justinRoot,
-    safetyRoot: safetyRootFor(paths, paths.justinRoot),
+    root: "jstack",
+    destinationRoot: paths.jstackRoot,
+    safetyRoot: safetyRootFor(paths, paths.jstackRoot),
     relativePath: INSTALL_MANIFEST_FILENAME,
     targetPath: paths.manifestPath,
     kind: "manifest",
@@ -1957,7 +1957,7 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     const context: AdapterPaths = {
       userHome: normalized.userHome,
       projectRoot: normalized.projectRoot,
-      justinStackHome: paths.justinRoot,
+      jstackHome: paths.jstackRoot,
       ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
       ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
     };
@@ -1978,8 +1978,8 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     target: normalized.target,
     targets: expandPlatformTargets(normalized.target),
     scope: normalized.scope,
-    justinRoot: paths.justinRoot,
-    storyRoot: paths.justinRoot,
+    jstackRoot: paths.jstackRoot,
+    storyRoot: paths.jstackRoot,
     skillsRoot: paths.skillsRoot,
     skillRoots: paths.skillRoots,
     ...(paths.claudeConfigDir === null ? {} : { claudeConfigDir: paths.claudeConfigDir }),
@@ -2029,8 +2029,8 @@ async function assertTargetMatchesPlan(entry: InstallPlanEntry): Promise<void> {
   }
 }
 
-function transactionJournalPath(justinRoot: string): string {
-  return path.join(justinRoot, INSTALL_TRANSACTION_FILENAME);
+function transactionJournalPath(jstackRoot: string): string {
+  return path.join(jstackRoot, INSTALL_TRANSACTION_FILENAME);
 }
 
 function assertAbsoluteNormalizedPath(value: unknown, label: string): asserts value is string {
@@ -2062,7 +2062,7 @@ function manifestEntriesForTransaction(
   root: InstallTransactionEntry["root"],
   destinationRoot: string,
 ): ManifestFileEntry[] {
-  if (root === "justinstack") return manifest.runtime_entries;
+  if (root === "jstack") return manifest.runtime_entries;
   const target = root.slice(0, -"-skills".length) as PlatformTarget;
   return manifest.installations
     .filter((record) => record.target === target && record.destination_root !== null && samePath(record.destination_root, destinationRoot))
@@ -2081,7 +2081,7 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
   }
   const record = value as Record<string, unknown>;
   const expectedKeys = [
-    "created_at", "entries", "justin_root", "manifest", "manifest_after_mode", "manifest_after_sha256",
+    "created_at", "entries", "jstack_root", "manifest", "manifest_after_mode", "manifest_after_sha256",
     "manifest_before_mode", "manifest_before_sha256", "manifest_path", "pid", "plan_fingerprint", "project_root",
     "schema_version", "transaction_id", "user_home",
   ].sort().join(",");
@@ -2102,9 +2102,9 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
   }
   assertAbsoluteNormalizedPath(record.user_home, "Install transaction user home");
   assertAbsoluteNormalizedPath(record.project_root, "Install transaction project root");
-  assertAbsoluteNormalizedPath(record.justin_root, "Install transaction runtime root");
+  assertAbsoluteNormalizedPath(record.jstack_root, "Install transaction runtime root");
   assertAbsoluteNormalizedPath(record.manifest_path, "Install transaction manifest path");
-  if (!samePath(record.user_home, paths.userHome) || !samePath(record.justin_root, paths.justinRoot) ||
+  if (!samePath(record.user_home, paths.userHome) || !samePath(record.jstack_root, paths.jstackRoot) ||
     !samePath(record.manifest_path, paths.manifestPath)) {
     throw new StoryStackError("Install transaction journal belongs to a different runtime", "INVALID_INSTALL_TRANSACTION");
   }
@@ -2142,7 +2142,7 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
     if (Object.keys(candidate).sort().join(",") !== entryKeys) {
       throw new StoryStackError("Install transaction entry has missing or unknown fields", "INVALID_INSTALL_TRANSACTION");
     }
-    if (candidate.root !== "justinstack" && candidate.root !== "claude-skills" &&
+    if (candidate.root !== "jstack" && candidate.root !== "claude-skills" &&
       candidate.root !== "bob-skills" && candidate.root !== "codex-skills") {
       throw new StoryStackError("Install transaction entry has an invalid root", "INVALID_INSTALL_TRANSACTION");
     }
@@ -2160,10 +2160,10 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
     const relativePath = candidate.relative_path as string;
     const root = candidate.root as InstallTransactionEntry["root"];
     const action = candidate.action as TransactionAction;
-    const relativePathAllowed = root === "justinstack"
+    const relativePathAllowed = root === "jstack"
       ? isRuntimePath(relativePath)
       : action === "remove" ? isManifestSkillPath(relativePath) : isSkillPath(relativePath);
-    if (!relativePathAllowed || root === "justinstack" && !samePath(destinationRoot, paths.justinRoot)) {
+    if (!relativePathAllowed || root === "jstack" && !samePath(destinationRoot, paths.jstackRoot)) {
       throw new StoryStackError("Install transaction entry is outside the owned-file allowlist", "INVALID_INSTALL_TRANSACTION");
     }
     const expectedTarget = path.resolve(nativePath(destinationRoot, relativePath));
@@ -2186,10 +2186,10 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
     if (action === "replace" && candidate.before_sha256 === candidate.after_sha256 && candidate.before_mode === candidate.after_mode) {
       throw new StoryStackError("Install transaction replacement has no observable change", "INVALID_INSTALL_TRANSACTION");
     }
-    if (candidate.backup_path !== null && !isContained(path.join(paths.justinRoot, "backups"), candidate.backup_path)) {
+    if (candidate.backup_path !== null && !isContained(path.join(paths.jstackRoot, "backups"), candidate.backup_path)) {
       throw new StoryStackError("Install transaction backup escapes the backup root", "INVALID_INSTALL_TRANSACTION");
     }
-    if (root !== "justinstack") {
+    if (root !== "jstack") {
       const target = root.slice(0, -"-skills".length) as PlatformTarget;
       const ownsDestination = parsedManifest.installations.some((installation) =>
         installation.target === target && installation.destination_root !== null &&
@@ -2229,7 +2229,7 @@ function parseInstallTransaction(source: string, paths: InstallTransactionPaths)
     pid: record.pid as number,
     user_home: record.user_home,
     project_root: record.project_root,
-    justin_root: record.justin_root,
+    jstack_root: record.jstack_root,
     plan_fingerprint: record.plan_fingerprint,
     manifest_path: record.manifest_path,
     manifest_before_sha256: record.manifest_before_sha256,
@@ -2258,8 +2258,8 @@ async function syncDirectory(directory: string): Promise<void> {
 }
 
 async function removeInstallTransaction(paths: InstallTransactionPaths, expectedSha256: string): Promise<void> {
-  const journalPath = transactionJournalPath(paths.justinRoot);
-  const issue = await inspectParentSafety(safetyRootFor(paths, paths.justinRoot), journalPath);
+  const journalPath = transactionJournalPath(paths.jstackRoot);
+  const issue = await inspectParentSafety(safetyRootFor(paths, paths.jstackRoot), journalPath);
   if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
   const collision = await inspectCollision(journalPath);
   if (collision === null) return;
@@ -2271,8 +2271,8 @@ async function removeInstallTransaction(paths: InstallTransactionPaths, expected
 }
 
 async function readInstallTransaction(paths: InstallTransactionPaths): Promise<{ journal: InstallTransactionJournal; sha256: string } | null> {
-  const journalPath = transactionJournalPath(paths.justinRoot);
-  const issue = await inspectParentSafety(safetyRootFor(paths, paths.justinRoot), journalPath);
+  const journalPath = transactionJournalPath(paths.jstackRoot);
+  const issue = await inspectParentSafety(safetyRootFor(paths, paths.jstackRoot), journalPath);
   if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
   const stats = await lstatOrNull(journalPath);
   if (stats === null) return null;
@@ -2321,7 +2321,7 @@ async function assertTransactionBackups(journal: InstallTransactionJournal): Pro
   const roots = { userHome: journal.user_home, projectRoot: journal.project_root };
   for (const entry of journal.entries) {
     if (entry.backup_path === null || entry.before_sha256 === null) continue;
-    const issue = await inspectParentSafety(safetyRootFor(roots, journal.justin_root), entry.backup_path);
+    const issue = await inspectParentSafety(safetyRootFor(roots, journal.jstack_root), entry.backup_path);
     const collision = issue === null ? await inspectCollision(entry.backup_path) : null;
     if (issue !== null || collision?.kind !== "file" || collision.sha256 !== entry.before_sha256) {
       throw new StoryStackError(`Install recovery backup is missing or invalid: ${entry.backup_path}`, "INSTALL_RECOVERY_REQUIRED");
@@ -2380,7 +2380,7 @@ async function recoverInstallTransaction(
   }
   const manifestState = await transactionEntryState({
     target_path: journal.manifest_path,
-    destination_root: journal.justin_root,
+    destination_root: journal.jstack_root,
     before_sha256: journal.manifest_before_sha256,
     before_mode: journal.manifest_before_mode,
     after_sha256: journal.manifest_after_sha256,
@@ -2395,7 +2395,7 @@ async function recoverInstallTransaction(
     await assertAppliedTransactionTargets(journal);
     const currentManifestState = await transactionEntryState({
       target_path: journal.manifest_path,
-      destination_root: journal.justin_root,
+      destination_root: journal.jstack_root,
       before_sha256: journal.manifest_before_sha256,
       before_mode: journal.manifest_before_mode,
       after_sha256: journal.manifest_after_sha256,
@@ -2408,7 +2408,7 @@ async function recoverInstallTransaction(
           if (process.platform !== "win32") await chmod(temporaryPath, journal.manifest_after_mode);
           if (await transactionEntryState({
             target_path: journal.manifest_path,
-            destination_root: journal.justin_root,
+            destination_root: journal.jstack_root,
             before_sha256: journal.manifest_before_sha256,
             before_mode: journal.manifest_before_mode,
             after_sha256: journal.manifest_after_sha256,
@@ -2424,7 +2424,7 @@ async function recoverInstallTransaction(
     await assertAppliedTransactionTargets(journal);
     if (await transactionEntryState({
       target_path: journal.manifest_path,
-      destination_root: journal.justin_root,
+      destination_root: journal.jstack_root,
       before_sha256: journal.manifest_before_sha256,
       before_mode: journal.manifest_before_mode,
       after_sha256: journal.manifest_after_sha256,
@@ -2495,7 +2495,7 @@ async function createInstallTransaction(
     pid: process.pid,
     user_home: plan.userHome,
     project_root: plan.projectRoot,
-    justin_root: plan.justinRoot,
+    jstack_root: plan.jstackRoot,
     plan_fingerprint: plan.fingerprint,
     manifest_path: plan.manifestPath,
     manifest_before_sha256: manifestEntry.previousSha256,
@@ -2509,8 +2509,8 @@ async function createInstallTransaction(
   if (Buffer.byteLength(contents, "utf8") > MAX_TRANSACTION_BYTES) {
     throw new StoryStackError("Install transaction journal exceeds the safe size limit", "INSTALL_INTERNAL_ERROR");
   }
-  const journalPath = transactionJournalPath(plan.justinRoot);
-  const safetyRoot = safetyRootFor(plan, plan.justinRoot);
+  const journalPath = transactionJournalPath(plan.jstackRoot);
+  const safetyRoot = safetyRootFor(plan, plan.jstackRoot);
   const issue = await inspectParentSafety(safetyRoot, journalPath);
   if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
   if (await inspectCollision(journalPath) !== null) {
@@ -2544,7 +2544,7 @@ async function markTransactionEntryApplied(
   };
   const contents = serializeInstallTransaction(next);
   const roots = { userHome: next.user_home, projectRoot: next.project_root };
-  const safetyRoot = safetyRootFor(roots, next.justin_root);
+  const safetyRoot = safetyRootFor(roots, next.jstack_root);
   const issue = await inspectParentSafety(safetyRoot, transaction.path);
   if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
   await writeFileAtomic(transaction.path, contents, {
@@ -2680,14 +2680,14 @@ async function applyInstallUnlocked(
     if (digest(contents) !== operation.sha256) {
       throw new StoryStackError(`Install target changed while creating its backup: ${entry.targetPath}`, "INSTALL_PLAN_STALE");
     }
-    const backupIssue = await inspectParentSafety(safetyRootFor(fresh, fresh.justinRoot), operation.targetPath);
+    const backupIssue = await inspectParentSafety(safetyRootFor(fresh, fresh.jstackRoot), operation.targetPath);
     if (backupIssue !== null) throw new StoryStackError(backupIssue, "UNSAFE_INSTALL_DESTINATION");
     await assertBackupMatchesPlan();
     if (operation.action === "create") {
       await writeFileAtomic(operation.targetPath, contents, {
         beforeRename: async (temporaryPath) => {
           if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
-          const issue = await inspectParentSafety(safetyRootFor(fresh, fresh.justinRoot), operation.targetPath);
+          const issue = await inspectParentSafety(safetyRootFor(fresh, fresh.jstackRoot), operation.targetPath);
           if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
           await assertTargetMatchesPlan(entry);
           await assertBackupMatchesPlan();
@@ -2800,7 +2800,7 @@ export async function applyInstall(
   const supplied = isInstallPlan(input) ? input : null;
   const normalized = await normalizeOptions(supplied?.normalizedOptions ?? input);
   const paths = resolveInstallPaths(normalized.userHome, {
-    justinStackHome: normalized.justinStackHome,
+    jstackHome: normalized.jstackHome,
     projectRoot: normalized.projectRoot,
     target: normalized.target,
     scope: normalized.scope,
@@ -2819,10 +2819,10 @@ export async function applyInstall(
 
 export function formatInstallPlan(plan: InstallPlan): string {
   const lines = [
-    `justinstack ${plan.packageVersion} install plan (dry-run; no files written)`,
+    `jstack ${plan.packageVersion} install plan (dry-run; no files written)`,
     `Target: ${plan.target}`,
     `Scope: ${plan.scope}`,
-    `Shared runtime: ${plan.justinRoot}`,
+    `Shared runtime: ${plan.jstackRoot}`,
   ];
   for (const target of plan.targets) lines.push(`${getPlatformAdapter(target).label} skills: ${plan.skillRoots[target] ?? "unresolved"}`);
   if (plan.backupOperations.length > 0) {
@@ -2851,7 +2851,7 @@ export function formatInstallPlan(plan: InstallPlan): string {
     for (const issue of plan.safetyIssues) lines.push(`  ${issue.targetPath}: ${issue.message}`);
   }
   if (plan.collisions.length > 0) {
-    lines.push("Unmanaged existing files require --confirm-overwrite JUSTINSTACK with --apply.");
+    lines.push("Unmanaged existing files require --confirm-overwrite JSTACK with --apply.");
   }
   lines.push("No agent configuration, PATH, shell profile, Git configuration, or remote service will be changed.");
   return `${lines.join("\n")}\n`;
@@ -2909,7 +2909,7 @@ function proposalSafetyRoot(
 export async function inspectPlatformInstallations(options: InstallerOptions = {}): Promise<PlatformDoctorStatus[]> {
   const normalized = await normalizeOptions(options);
   const paths = resolveInstallPaths(normalized.userHome, {
-    justinStackHome: normalized.justinStackHome,
+    jstackHome: normalized.jstackHome,
     projectRoot: normalized.projectRoot,
     target: normalized.target,
     scope: normalized.scope,
@@ -2921,7 +2921,7 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
   let installedManifest: InstallManifestV2 | null = null;
   let manifestProblem = false;
   try {
-    const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.justinRoot));
+    const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.jstackRoot));
     installedManifest = loaded?.manifest.schema_version === 2 ? loaded.manifest : null;
     const manifestStats = loaded === null ? null : await lstat(paths.manifestPath);
     manifestProblem = loaded !== null && (
@@ -2934,8 +2934,8 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
   const runtimeExpected = new Map<string, ExpectedInstallFile>();
   for (const descriptor of await runtimeDescriptors(
     normalized.packageRoot,
-    paths.justinRoot,
-    safetyRootFor(paths, paths.justinRoot),
+    paths.jstackRoot,
+    safetyRootFor(paths, paths.jstackRoot),
     normalized.packageVersion,
   )) {
     runtimeExpected.set(descriptor.relativePath, {
@@ -2947,7 +2947,7 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
   const runtimeOwnership = new Map((installedManifest?.runtime_entries ?? []).map((entry) => [entry.path, entry.sha256]));
   const obsoleteRuntime = (installedManifest?.runtime_entries ?? [])
     .filter((entry) => !currentRuntimePaths.has(entry.path))
-    .map((entry) => path.resolve(nativePath(paths.justinRoot, entry.path)));
+    .map((entry) => path.resolve(nativePath(paths.jstackRoot, entry.path)));
   const statuses: PlatformDoctorStatus[] = [];
   for (const target of expandPlatformTargets(normalized.target)) {
     const configuredRoot = paths.skillRoots[target];
@@ -2970,12 +2970,12 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
         .map((entry) => path.resolve(nativePath(skillsRoot, entry.path))),
     ];
     if (record === undefined || !recordedRootIsSafe || manifestProblem) stale.push(paths.manifestPath);
-    const runtimeSafetyRoot = safetyRootFor(paths, paths.justinRoot);
+    const runtimeSafetyRoot = safetyRootFor(paths, paths.jstackRoot);
     for (const [relative, expected] of runtimeExpected) {
-      const targetPath = path.resolve(nativePath(paths.justinRoot, relative));
+      const targetPath = path.resolve(nativePath(paths.jstackRoot, relative));
       const ownershipMatches = runtimeOwnership.get(relative) === expected.sha256;
       if (!ownershipMatches) addUnique(stale, paths.manifestPath);
-      const status = await inspectDoctorFile(targetPath, paths.justinRoot, runtimeSafetyRoot, expected);
+      const status = await inspectDoctorFile(targetPath, paths.jstackRoot, runtimeSafetyRoot, expected);
       if (status === "missing") addUnique(missing, targetPath);
       else if (status === "stale" || !ownershipMatches) addUnique(stale, targetPath);
       else addUnique(installed, targetPath);
@@ -2993,7 +2993,7 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
     const context: AdapterPaths = {
       userHome: normalized.userHome,
       projectRoot: normalized.projectRoot,
-      justinStackHome: paths.justinRoot,
+      jstackHome: paths.jstackRoot,
       ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
       ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
     };
@@ -3061,7 +3061,7 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
   const normalizedWithVersion = await normalizeOptions(options);
   const { packageVersion: _ignored, ...normalized } = normalizedWithVersion;
   const paths = resolveInstallPaths(normalized.userHome, {
-    justinStackHome: normalized.justinStackHome,
+    jstackHome: normalized.jstackHome,
     projectRoot: normalized.projectRoot,
     target: normalized.target,
     scope: normalized.scope,
@@ -3069,12 +3069,12 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
     ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
     ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
   });
-  const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.justinRoot));
+  const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.jstackRoot));
   if (loaded === null) {
     const reason = `Install manifest not found: ${paths.manifestPath}`;
     return {
       userHome: paths.userHome, projectRoot: paths.projectRoot, target: normalized.target, scope: normalized.scope,
-      justinRoot: paths.justinRoot, storyRoot: paths.justinRoot, skillsRoot: paths.skillsRoot, skillRoots: paths.skillRoots,
+      jstackRoot: paths.jstackRoot, storyRoot: paths.jstackRoot, skillsRoot: paths.skillsRoot, skillRoots: paths.skillRoots,
       manifestPath: paths.manifestPath, manifestFound: false, manifestSha256: null, packageVersion: null, entries: [],
       issues: [reason], blocked: [{ targetPath: paths.manifestPath, reason }], canFullyUninstall: false,
       manifest: null, normalizedOptions: normalized,
@@ -3083,7 +3083,7 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
   const entries: UninstallPlanEntry[] = [];
   if (loaded.manifest.schema_version === 1) {
     for (const entry of loaded.manifest.entries) {
-      const destinationRoot = entry.root === "story-stack" ? paths.justinRoot : paths.skillsRoot;
+      const destinationRoot = entry.root === "story-stack" ? paths.jstackRoot : paths.skillsRoot;
       entries.push(await inspectUninstallEntry(
         destinationRoot,
         safetyRootFor(paths, destinationRoot),
@@ -3147,9 +3147,9 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
     if (removesAll) {
       for (const entry of loaded.manifest.runtime_entries) {
         entries.push(await inspectUninstallEntry(
-          paths.justinRoot,
-          safetyRootFor(paths, paths.justinRoot),
-          "justinstack",
+          paths.jstackRoot,
+          safetyRootFor(paths, paths.jstackRoot),
+          "jstack",
           entry,
           null,
         ));
@@ -3157,7 +3157,7 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
     }
     if (selected.length === 0) {
       entries.push({
-        root: "justinstack", destinationRoot: paths.justinRoot, safetyRoot: safetyRootFor(paths, paths.justinRoot), installationKey: null,
+        root: "jstack", destinationRoot: paths.jstackRoot, safetyRoot: safetyRootFor(paths, paths.jstackRoot), installationKey: null,
         relativePath: INSTALL_MANIFEST_FILENAME, targetPath: paths.manifestPath, expectedSha256: loaded.sha256,
         actualSha256: loaded.sha256, status: "modified", reason: "No matching installed target and scope were found",
       });
@@ -3171,8 +3171,8 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
     projectRoot: paths.projectRoot,
     target: normalized.target,
     scope: normalized.scope,
-    justinRoot: paths.justinRoot,
-    storyRoot: paths.justinRoot,
+    jstackRoot: paths.jstackRoot,
+    storyRoot: paths.jstackRoot,
     skillsRoot: paths.skillsRoot,
     skillRoots: paths.skillRoots,
     manifestPath: paths.manifestPath,
@@ -3194,7 +3194,7 @@ function isUninstallPlan(value: UninstallPlan | InstallerOptions): value is Unin
 
 async function manifestStillMatches(plan: UninstallPlan): Promise<boolean> {
   if (plan.manifestSha256 === null) return false;
-  if (await inspectParentSafety(safetyRootFor(plan, plan.justinRoot), plan.manifestPath) !== null) return false;
+  if (await inspectParentSafety(safetyRootFor(plan, plan.jstackRoot), plan.manifestPath) !== null) return false;
   const stats = await lstatOrNull(plan.manifestPath);
   return stats !== null && stats.isFile() && !stats.isSymbolicLink() && await digestFile(plan.manifestPath) === plan.manifestSha256;
 }
@@ -3221,7 +3221,7 @@ async function applyUninstallUnlocked(input: UninstallPlan | InstallerOptions = 
   const missing: string[] = [];
   const preserved: PreservedInstallFile[] = [];
   const failedInstallationKeys = new Set<string>();
-  for (const entry of fresh.entries.filter((candidate) => candidate.root !== "justinstack" || fresh.manifest?.schema_version === 1)) {
+  for (const entry of fresh.entries.filter((candidate) => candidate.root !== "jstack" || fresh.manifest?.schema_version === 1)) {
     if (entry.status === "missing") { missing.push(entry.targetPath); continue; }
     if (entry.status !== "remove") {
       preserved.push({ targetPath: entry.targetPath, reason: entry.reason ?? entry.status });
@@ -3259,7 +3259,7 @@ async function applyUninstallUnlocked(input: UninstallPlan | InstallerOptions = 
       (record) => !selectedKeys.has(record.key) || blockedKeys.has(record.key),
     );
     if (remaining.length === 0 && preserved.length === 0) {
-      for (const entry of fresh.entries.filter((candidate) => candidate.root === "justinstack")) {
+      for (const entry of fresh.entries.filter((candidate) => candidate.root === "jstack")) {
         if (entry.status === "missing") { missing.push(entry.targetPath); continue; }
         if (entry.status !== "remove") { preserved.push({ targetPath: entry.targetPath, reason: entry.reason ?? entry.status }); continue; }
         try {
@@ -3304,7 +3304,7 @@ export async function applyUninstall(input: UninstallPlan | InstallerOptions = {
   const supplied = isUninstallPlan(input) ? input : null;
   const normalizedWithVersion = await normalizeOptions(supplied?.normalizedOptions ?? input);
   const paths = resolveInstallPaths(normalizedWithVersion.userHome, {
-    justinStackHome: normalizedWithVersion.justinStackHome,
+    jstackHome: normalizedWithVersion.jstackHome,
     projectRoot: normalizedWithVersion.projectRoot,
     target: normalizedWithVersion.target,
     scope: normalizedWithVersion.scope,
@@ -3317,7 +3317,7 @@ export async function applyUninstall(input: UninstallPlan | InstallerOptions = {
 
 export function formatUninstallPlan(plan: UninstallPlan): string {
   const lines = [
-    "justinstack uninstall plan (dry-run; no files removed)",
+    "jstack uninstall plan (dry-run; no files removed)",
     `Target: ${plan.target}`,
     `Scope: ${plan.scope}`,
     `Manifest: ${plan.manifestPath}`,
@@ -3330,6 +3330,6 @@ export function formatUninstallPlan(plan: UninstallPlan): string {
   lines.push(plan.issues.length > 0
     ? "Modified or unsafe files will be preserved with their manifest ownership."
     : "Only manifest-owned, hash-matching files will be removed.");
-  lines.push("Story checkpoints under the JustinStack workspace directory are always preserved.");
+  lines.push("Story checkpoints under the JStack workspace directory are always preserved.");
   return `${lines.join("\n")}\n`;
 }

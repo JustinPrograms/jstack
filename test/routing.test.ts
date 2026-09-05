@@ -85,7 +85,7 @@ test("routing CLI is explicit, JSON-safe, and preserves a bounded local record",
   const fixture = await createGitRepository(t);
   const home = await temporaryDirectory(t, "routing CLI home ");
   const identity = { projectSlug: "routing-project", ticketKey: "DEMO-404" } as const;
-  const store = new CheckpointStore({ justinStackHome: home, legacyStateRoot: path.join(home, "legacy"), packageRoot: path.resolve(".") });
+  const store = new CheckpointStore({ jstackHome: home, legacyStateRoot: path.join(home, "legacy"), packageRoot: path.resolve(".") });
   await store.create({ ...identity, repositoryPath: fixture.root, baseBranch: "main" });
   const taskFile = path.join(fixture.root, "routing task.json");
   await writeFile(taskFile, JSON.stringify({
@@ -101,7 +101,7 @@ test("routing CLI is explicit, JSON-safe, and preserves a bounded local record",
   const stdout: string[] = [];
   const stderr: string[] = [];
   const io: CliIo = { stdout: (line) => stdout.push(line), stderr: (line) => stderr.push(line) };
-  const shared = { cwd: fixture.root, packageRoot: path.resolve("."), env: { ...process.env, JUSTINSTACK_HOME: home }, io };
+  const shared = { cwd: fixture.root, packageRoot: path.resolve("."), env: { ...process.env, JSTACK_HOME: home }, io };
   assert.equal(await main(["state", "upgrade-routing", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--json"], shared), 0);
   assert.equal(await main(["state", "routing", "assess", "--workspace", identity.projectSlug, "--story", identity.ticketKey, "--repo", fixture.root, "--input-file", taskFile, "--json"], shared), 0);
   assert.equal(JSON.parse(stdout.at(-1) ?? "{}").result, "recommended");

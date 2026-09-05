@@ -3,7 +3,7 @@
 
 ## Objective
 
-Add a provider-neutral *advisory* orchestration policy to JustinStack that
+Add a provider-neutral *advisory* orchestration policy to JStack that
 classifies a unit of work, recommends an appropriate capability and amount of
 parallelism, records evidence for escalation, and preserves enough local state
 for a later agent to continue without rediscovering the task. It must not claim
@@ -38,7 +38,7 @@ to control a host until that host has a tested execution integration.
   model at runtime.
 - Do not claim v1 can spawn, schedule, cap, or route an agent on a host. The
   current adapters only install skills and emit advisory configuration proposals.
-- Do not replace JustinStack's existing story bundle with several independently
+- Do not replace JStack's existing story bundle with several independently
   writable Markdown files.
 - Do not infer that a declared slot is a host-observed active agent, or that a
   scope warning proves two external agents are running.
@@ -52,7 +52,7 @@ to control a host until that host has a tested execution integration.
   projects recovery views, uses a per-story coordinator lock, and detects drift.
 - `policies/checkpoint-protocol.md` already defines privacy, safety, and
   coordinator-only write rules.
-- `skills/story`, `skills/plan-eng-review`, `skills/justinstack-review`, and
+- `skills/story`, `skills/plan-eng-review`, `skills/jstack-review`, and
   `skills/resume-story` define the planning and recovery lifecycle.
 - `adapters/` keeps platform-specific material declarative; canonical workflow
   content must not be duplicated per agent platform.
@@ -119,7 +119,7 @@ prompt, or is prohibited; `do-not-delegate` remains a valid outcome.
 
 Keep `context.md` as the canonical narrative handoff and add one engine-owned,
 versioned `routing.json` record to the existing continuity bundle. This is a
-small explicit bundle-schema migration, not a free-form `.justinstack/`
+small explicit bundle-schema migration, not a free-form `.jstack/`
 directory or a live scheduler graph. `state.json` hashes `routing.json`; the
 record is parsed/serialized only by the checkpoint engine and is written before
 the state-last commit marker. Legacy bundle schema v1 remains readable with an
@@ -290,7 +290,7 @@ continuity work, not compete with it.
 
 1. The valuable problem is avoiding repeated discovery after the latest
    successful checkpoint, compaction, and agent handoffs. That is directly
-   aligned with JustinStack's stated product, and the current bundle already
+   aligned with JStack's stated product, and the current bundle already
    addresses part of it without promising a final save at an abrupt cutoff.
 2. The premise that a portable package can choose models or cap concurrency is
    false today. `adapters/types.ts` exposes only skill paths, proposals, and

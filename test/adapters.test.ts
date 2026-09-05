@@ -96,13 +96,13 @@ test("configuration guidance is proposal-only and carries the permanent safety c
 test("Bob and Codex doctor reminders disclose their required verification steps", () => {
   const bob = getPlatformAdapter("bob").doctorReminders("global", paths()).map((item) => item.message).join("\n");
   assert.match(bob, /Advanced mode/u);
-  assert.match(bob, /\/justinstack-review/u);
-  assert.match(bob, /\$justinstack-review/u);
+  assert.match(bob, /\/jstack-review/u);
+  assert.match(bob, /\$jstack-review/u);
   assert.match(bob, /\/skills/u);
   assert.match(bob, /not applied/u);
 
   const codex = getPlatformAdapter("codex").doctorReminders("project", paths()).map((item) => item.message).join("\n");
-  assert.match(codex, /\$justinstack-review/u);
+  assert.match(codex, /\$jstack-review/u);
   assert.match(codex, /\.agents[\\/]skills/u);
   assert.doesNotMatch(codex, /\.codex[\\/]skills/u);
   assert.match(codex, /outside the sandbox/u);
@@ -137,7 +137,7 @@ test("platform enforcement proposals use documented local configuration shapes",
   const codexRules = getPlatformAdapter("codex").proposals("project", value)
     .find((item) => item.id === "codex-rules");
   assert.ok(codexRules);
-  assert.equal(codexRules.targetPath, path.join(value.projectRoot, ".codex", "rules", "justinstack.rules"));
+  assert.equal(codexRules.targetPath, path.join(value.projectRoot, ".codex", "rules", "jstack.rules"));
   assert.match(codexRules.snippet, /decision = "forbidden"/u);
   assert.match(codexRules.snippet, /decision = "prompt"/u);
   assert.match(codexRules.snippet, /outside the sandbox/u);
@@ -159,7 +159,7 @@ test("platform enforcement proposals use documented local configuration shapes",
   );
   assert.equal(
     codexGlobal.find((item) => item.id === "codex-rules")?.targetPath,
-    path.join(value.codexHome ?? "", "rules", "justinstack.rules"),
+    path.join(value.codexHome ?? "", "rules", "jstack.rules"),
   );
 });
 
@@ -180,16 +180,16 @@ test("hook commands encode metacharacter-rich install paths instead of shell-quo
   const decodedUrl = Buffer.from(encodedRuntimeUrl, "base64url").toString("utf8");
   assert.equal(
     decodedUrl,
-    pathToFileURL(path.join(userHome, ".justin-stack", "runtime", "dist", "src", "cli.js")).href,
+    pathToFileURL(path.join(userHome, ".jstack", "runtime", "dist", "src", "cli.js")).href,
   );
 });
 
 test("hook commands execute through the host shell when the runtime path contains metacharacters", async () => {
-  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "justinstack hook $ & (100%) ! "));
-  const runtimeCli = path.join(fixtureRoot, ".justin-stack", "runtime", "dist", "src", "cli.js");
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "jstack hook $ & (100%) ! "));
+  const runtimeCli = path.join(fixtureRoot, ".jstack", "runtime", "dist", "src", "cli.js");
   await mkdir(path.dirname(runtimeCli), { recursive: true });
   await writeFile(
-    path.join(fixtureRoot, ".justin-stack", "runtime", "package.json"),
+    path.join(fixtureRoot, ".jstack", "runtime", "package.json"),
     '{"type":"module"}\n',
     "utf8",
   );
@@ -222,7 +222,7 @@ test("hook commands execute through the host shell when the runtime path contain
 });
 
 test("hook bootstrap fails closed when the runtime cannot be imported", async (t) => {
-  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "justinstack-missing-hook-runtime-"));
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "jstack-missing-hook-runtime-"));
   t.after(async () => rm(fixtureRoot, { recursive: true, force: true }));
   const command = localSafetyHookCommand({ userHome: fixtureRoot, projectRoot: fixtureRoot });
   const match = /^node -e "([^"]+)" ([A-Za-z0-9_-]+)$/u.exec(command);

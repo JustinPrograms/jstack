@@ -40,8 +40,8 @@ export const claudeAdapter: PlatformAdapter = {
         id: "claude-instructions",
         kind: "instructions",
         targetPath: instructionsPath(scope, paths),
-        summary: "Propose adding JustinStack's permanent local-only safety contract to Claude instructions.",
-        snippet: `## JustinStack safety\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
+        summary: "Propose adding JStack's permanent local-only safety contract to Claude instructions.",
+        snippet: `## JStack safety\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
       }),
       proposal({
         id: "claude-permissions",
@@ -101,7 +101,7 @@ export const claudeAdapter: PlatformAdapter = {
       {
         id: "claude-invocation",
         level: "info",
-        message: "Invoke the review skill as /justinstack-review in Claude Code; Claude may also load it automatically from its description.",
+        message: "Invoke the review skill as /jstack-review in Claude Code; Claude may also load it automatically from its description.",
       },
       {
         id: "claude-proposals-not-applied",

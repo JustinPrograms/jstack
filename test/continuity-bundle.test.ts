@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseContinuityBundleState } from "../src/checkpoint/bundle.js";
 import { parseCheckpoint, serializeCheckpoint } from "../src/checkpoint/frontmatter.js";
 import { repositoryIdentity } from "../src/checkpoint/identifiers.js";
-import { CheckpointStore, defaultJustinStackHome, defaultLegacyStateRoot } from "../src/checkpoint/store.js";
+import { CheckpointStore, defaultJStackHome, defaultLegacyStateRoot } from "../src/checkpoint/store.js";
 import { replaceSection } from "../src/checkpoint/template.js";
 import { CONTINUITY_BUNDLE_FILES } from "../src/checkpoint/types.js";
 import { createGitRepository, temporaryDirectory } from "./helpers/git-fixture.js";
@@ -27,45 +27,44 @@ function asLegacyV1(source: string, repositoryPath: string): string {
     .replace(/^untracked_file_count:/mu, "untracked_files: []\nuntracked_file_count:");
 }
 
-test("JustinStack home supports current and legacy environment names with stable precedence", () => {
-  const preferred = path.resolve("preferred-justinstack-home");
-  const alternate = path.resolve("alternate-justin-stack-home");
+test("JStack home supports current and legacy environment names with stable precedence", () => {
+  const preferred = path.resolve("preferred-jstack-home");
+  const alternate = path.resolve("alternate-jstack-home");
   const legacy = path.resolve("legacy-story-stack-home");
   assert.equal(
-    defaultJustinStackHome({
-      JUSTINSTACK_HOME: preferred,
-      JUSTIN_STACK_HOME: alternate,
+    defaultJStackHome({
+      JSTACK_HOME: preferred,
       STORY_STACK_HOME: legacy,
     }),
     preferred,
   );
-  assert.equal(defaultJustinStackHome({ JUSTIN_STACK_HOME: alternate, STORY_STACK_HOME: legacy }), alternate);
-  assert.equal(defaultJustinStackHome({ JUSTINSTACK_HOME: "", JUSTIN_STACK_HOME: alternate }), alternate);
-  assert.equal(defaultJustinStackHome({ STORY_STACK_HOME: legacy }), legacy);
+  assert.equal(defaultJStackHome({ JSTACK_HOME: alternate, STORY_STACK_HOME: legacy }), alternate);
+  assert.equal(defaultJStackHome({ JSTACK_HOME: "", STORY_STACK_HOME: alternate }), alternate);
+  assert.equal(defaultJStackHome({ STORY_STACK_HOME: legacy }), legacy);
 });
 
 test("new and legacy default state roots remain distinct and independently overridable", () => {
-  const expectedNewHome = path.join(os.homedir(), ".justin-stack");
+  const expectedNewHome = path.join(os.homedir(), ".jstack");
   const expectedLegacyRoot = path.join(os.homedir(), ".story-stack", "state");
-  assert.equal(defaultJustinStackHome({}), expectedNewHome);
+  assert.equal(defaultJStackHome({}), expectedNewHome);
   assert.equal(defaultLegacyStateRoot({}), expectedLegacyRoot);
-  assert.notEqual(defaultLegacyStateRoot({}), path.join(defaultJustinStackHome({}), "state"));
+  assert.notEqual(defaultLegacyStateRoot({}), path.join(defaultJStackHome({}), "state"));
 
   const newHome = path.resolve("isolated-new-home");
   const oldHome = path.resolve("isolated-old-home");
-  const environment = { JUSTINSTACK_HOME: newHome, STORY_STACK_HOME: oldHome };
-  assert.equal(defaultJustinStackHome(environment), newHome);
+  const environment = { JSTACK_HOME: newHome, STORY_STACK_HOME: oldHome };
+  assert.equal(defaultJStackHome(environment), newHome);
   assert.equal(defaultLegacyStateRoot(environment), path.join(oldHome, "state"));
 
   // Redirecting only the new home must never redirect or hide legacy lookup.
-  assert.equal(defaultLegacyStateRoot({ JUSTINSTACK_HOME: newHome }), expectedLegacyRoot);
-  assert.equal(new CheckpointStore({ justinStackHome: newHome }).stateRoot, expectedLegacyRoot);
+  assert.equal(defaultLegacyStateRoot({ JSTACK_HOME: newHome }), expectedLegacyRoot);
+  assert.equal(new CheckpointStore({ jstackHome: newHome }).stateRoot, expectedLegacyRoot);
   assert.equal(new CheckpointStore({ storyStackHome: oldHome }).stateRoot, path.join(oldHome, "state"));
 });
 
 test("continuity creation publishes exactly six consistent files and is idempotent", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin stack bundle ");
+  const home = await temporaryDirectory(t, "jstack bundle ");
   const store = createStore(home);
   const created = await store.create({
     ...IDENTITY,
@@ -120,7 +119,7 @@ test("continuity creation publishes exactly six consistent files and is idempote
 
 test("derived drift is repairable without rewriting canonical context", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-repair-");
+  const home = await temporaryDirectory(t, "jstack-repair-");
   const store = createStore(home);
   await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
   const paths = store.bundlePathsFor(IDENTITY);
@@ -148,7 +147,7 @@ test("derived drift is repairable without rewriting canonical context", async (t
 
 test("initial publication refuses a pre-existing story directory without replacing its files", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-existing-story-");
+  const home = await temporaryDirectory(t, "jstack-existing-story-");
   const store = createStore(home);
   const paths = store.bundlePathsFor(IDENTITY);
   await mkdir(paths.directory, { recursive: true });
@@ -169,7 +168,7 @@ test("initial publication refuses a pre-existing story directory without replaci
 
 test("recovery exposes the complete cross-agent handoff contract from current Git state", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-recovery-");
+  const home = await temporaryDirectory(t, "jstack-recovery-");
   const store = createStore(home);
   await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main", objective: "Keep local work resumable." });
   let checkpoint = await store.load(IDENTITY);
@@ -208,12 +207,12 @@ test("recovery exposes the complete cross-agent handoff contract from current Gi
 
 test("legacy migration creates a bundle without deleting or silently replacing the source", async (t) => {
   const fixture = await createGitRepository(t);
-  const sourceHome = await temporaryDirectory(t, "justin-stack-source-");
+  const sourceHome = await temporaryDirectory(t, "jstack-source-");
   const sourceStore = createStore(sourceHome);
   const source = await sourceStore.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
   const legacySource = asLegacyV1(serializeCheckpoint(source.checkpoint), fixture.root);
 
-  const destinationHome = await temporaryDirectory(t, "justin-stack-migration-");
+  const destinationHome = await temporaryDirectory(t, "jstack-migration-");
   const store = createStore(destinationHome);
   const legacyPath = store.legacyPathFor(IDENTITY);
   await mkdir(path.dirname(legacyPath), { recursive: true });
@@ -242,7 +241,7 @@ test("legacy migration creates a bundle without deleting or silently replacing t
 test("checkpoint bundles persist repository identity and Git summaries without paths or file names", async (t) => {
   const fixture = await createGitRepository(t, { initialFile: "sensitive-client-plan.txt" });
   await writeFile(fixture.file, "locally changed fixture content\n", "utf8");
-  const home = await temporaryDirectory(t, "justin-stack-private-state-");
+  const home = await temporaryDirectory(t, "jstack-private-state-");
   const store = createStore(home);
   const created = await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
   const paths = store.bundlePathsFor(IDENTITY);
@@ -269,7 +268,7 @@ test("checkpoint bundles persist repository identity and Git summaries without p
 
 test("explicit story identity is enforced on every canonical read and mutation path", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-identity-");
+  const home = await temporaryDirectory(t, "jstack-identity-");
   const store = createStore(home);
   const firstIdentity = { projectSlug: "sample-project", ticketKey: "DEMO-101" } as const;
   const secondIdentity = { projectSlug: "sample-project", ticketKey: "DEMO-202" } as const;
@@ -325,11 +324,11 @@ test("explicit story identity is enforced on every canonical read and mutation p
 
 test("state roots inside the active repository are rejected before checkpoint writes", async (t) => {
   const fixture = await createGitRepository(t);
-  const outside = await temporaryDirectory(t, "justin-stack-safe-root-");
-  const unsafeWorkspacesRoot = path.join(fixture.root, ".justin-stack-state");
+  const outside = await temporaryDirectory(t, "jstack-safe-root-");
+  const unsafeWorkspacesRoot = path.join(fixture.root, ".jstack-state");
   const unsafeLegacyRoot = path.join(fixture.root, ".legacy-state");
   const canonicalStore = new CheckpointStore({
-    justinStackHome: outside,
+    jstackHome: outside,
     workspacesRoot: unsafeWorkspacesRoot,
     legacyStateRoot: path.join(outside, "legacy"),
     packageRoot: PACKAGE_ROOT,
@@ -344,7 +343,7 @@ test("state roots inside the active repository are rejected before checkpoint wr
   assert.equal(validation.status, "missing-required-information");
 
   const legacyStore = new CheckpointStore({
-    justinStackHome: outside,
+    jstackHome: outside,
     workspacesRoot: path.join(outside, "workspaces"),
     legacyStateRoot: unsafeLegacyRoot,
     packageRoot: PACKAGE_ROOT,
@@ -358,7 +357,7 @@ test("state roots inside the active repository are rejected before checkpoint wr
 
 test("concurrent stale-lock reclaimers cannot remove a newly elected writer lease", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-lock-election-");
+  const home = await temporaryDirectory(t, "jstack-lock-election-");
   const store = createStore(home);
   await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
   const paths = store.bundlePathsFor(IDENTITY);
@@ -388,7 +387,7 @@ test("concurrent stale-lock reclaimers cannot remove a newly elected writer leas
 
 test("aged malformed choosing and ticket artifacts are reclaimed without deleting fresh contenders", async (t) => {
   const fixture = await createGitRepository(t);
-  const home = await temporaryDirectory(t, "justin-stack-malformed-lock-");
+  const home = await temporaryDirectory(t, "jstack-malformed-lock-");
   const store = createStore(home);
   await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
   const paths = store.bundlePathsFor(IDENTITY);

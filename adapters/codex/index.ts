@@ -34,15 +34,15 @@ export const codexAdapter: PlatformAdapter = {
         id: "codex-instructions",
         kind: "instructions",
         targetPath: instructionsPath(scope, paths),
-        summary: "Propose adding JustinStack's permanent local-only safety contract to Codex instructions.",
-        snippet: `## JustinStack safety\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
+        summary: "Propose adding JStack's permanent local-only safety contract to Codex instructions.",
+        snippet: `## JStack safety\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
       }),
       proposal({
         id: "codex-rules",
         kind: "rules",
-        targetPath: path.join(codexRoot(scope, paths), "rules", "justinstack.rules"),
+        targetPath: path.join(codexRoot(scope, paths), "rules", "jstack.rules"),
         summary: "Propose Codex outside-sandbox escalation rules for common remote mutations and local Git writes.",
-        snippet: `# JustinStack defense in depth for commands requesting execution outside the sandbox.
+        snippet: `# JStack defense in depth for commands requesting execution outside the sandbox.
 # These rules do not govern commands already permitted inside the sandbox or non-shell tools, MCP, and API actions.
 prefix_rule(pattern = ["git", "push"], decision = "forbidden", justification = "Stop locally; the user handles pushes.")
 prefix_rule(pattern = ["git.exe", "push"], decision = "forbidden", justification = "Stop locally; the user handles pushes.")
@@ -58,7 +58,7 @@ prefix_rule(pattern = ["git", ["add", "commit"]], decision = "prompt", justifica
       {
         id: "codex-skill-root",
         level: "info",
-        message: `Invoke the review skill as $justinstack-review in Codex, or select it through /skills. Skills are installed at ${codexSkillRoot(scope, paths)}.`,
+        message: `Invoke the review skill as $jstack-review in Codex, or select it through /skills. Skills are installed at ${codexSkillRoot(scope, paths)}.`,
       },
       {
         id: "codex-rules-scope",

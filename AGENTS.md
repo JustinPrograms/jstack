@@ -47,6 +47,6 @@ git worktree prune
 
 Leave the branch intact unless the user separately asks to remove it after verifying it is no longer needed.
 
-## JustinStack-specific guidance
+## JStack-specific guidance
 
 The product's shipped skills have their own safety contract. Do not change their canonical policy merely to accommodate this contributor workflow. This file governs repository-maintenance agents acting under the owner's explicit authorization; installed end-user workflows must retain their documented safety guarantees.

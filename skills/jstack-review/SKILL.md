@@ -1,18 +1,18 @@
 ---
-name: justinstack-review
-description: Review a local diff against an active JustinStack story and report actionable findings. Use for JustinStack story-compliance review; it is report-only unless the user separately authorizes local fixes.
+name: jstack-review
+description: Review a local diff against an active JStack story and report actionable findings. Use for JStack story-compliance review; it is report-only unless the user separately authorizes local fixes.
 ---
 
-# JustinStack Review
+# JStack Review
 
 Evaluate the complete local change set against the active story and repository conventions. Produce evidence-backed findings, but do not edit application source, tests, generated artifacts, repository configuration, or checkpoint state unless the user separately authorizes that local write. A review request is not permission to fix, update state, stage, commit, or perform a remote action.
 
-Before acting, resolve the JustinStack runtime home from the first non-empty value of `JUSTINSTACK_HOME`, `JUSTIN_STACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.justin-stack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/justinstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `justinstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available.
+Before acting, resolve the JStack runtime home from the first non-empty value of `JSTACK_HOME`, `JSTACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.jstack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/jstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `jstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available.
 
 ## Establish review scope
 
 1. Resolve the canonical repository and explicit workspace/story identity.
-2. Read the bundle with `justinstack state show`, then run `state validate --json` using `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path>`.
+2. Read the bundle with `jstack state show`, then run `state validate --json` using `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path>`.
 3. Stop for an unresolved branch or repository mismatch. Reconcile same-branch drift only from observable evidence; never infer intent from a filename.
 4. Use the locally available base branch recorded by canonical state. If it is absent or ambiguous, report missing information and ask rather than selecting a convenient comparison.
 5. Inspect the full local change set: committed branch changes relative to the local merge base, staged and unstaged changes, and relevant untracked files. Use read-only Git operations without switching branches or altering the index.
@@ -56,9 +56,9 @@ If there are no findings, say so and name checks not run or evidence unavailable
 
 If and only if the user authorizes local checkpoint writes, replace stale review state with a concise current summary. Record unresolved findings as paraphrases in pending feedback and move only demonstrably resolved items to addressed feedback. Update inspected files, validation results, blockers, approvals, and the exact next action when evidence warrants it. When the request is review-only, read-only, or explicitly says not to write, leave the bundle unchanged and say so in the report.
 
-Do not present an old check as current after relevant files or configuration changed. Capture the current fingerprint immediately before running appropriate checks through the host. Only after directly observing success, mark validation current through `justinstack state record-validation ... --expected-fingerprint <sha256> --confirm-validation-succeeded`; JustinStack does not execute the check.
+Do not present an old check as current after relevant files or configuration changed. Capture the current fingerprint immediately before running appropriate checks through the host. Only after directly observing success, mark validation current through `jstack state record-validation ... --expected-fingerprint <sha256> --confirm-validation-succeeded`; JStack does not execute the check.
 
-For an authorized checkpoint update, have the coordinating agent write through `justinstack state update` with a complete temporary body and explicit identity/repository arguments. Preserve status unless an explicit supported transition applies, preserve approval gates, and remove the temporary file after success or failure. If only Git-derived metadata changed and semantic state remains accurate, use `state snapshot`. Validate after any update.
+For an authorized checkpoint update, have the coordinating agent write through `jstack state update` with a complete temporary body and explicit identity/repository arguments. Preserve status unless an explicit supported transition applies, preserve approval gates, and remove the temporary file after success or failure. If only Git-derived metadata changed and semantic state remains accurate, use `state snapshot`. Validate after any update.
 
 Do not edit any of the six bundle files directly; the engine replaces each changed file atomically and writes the integrity manifest last so partial updates are detected.
 

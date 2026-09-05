@@ -30,17 +30,17 @@ async function doesNotExist(filePath: string): Promise<boolean> {
 }
 
 test("CLI install target all in project scope is a true dry run", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack CLI space ");
+  const root = await temporaryDirectory(t, "jstack CLI space ");
   const projectRoot = path.join(root, "project with spaces");
   const fakeHome = path.join(root, "home with spaces");
-  const runtime = path.join(fakeHome, ".justin-stack");
+  const runtime = path.join(fakeHome, ".jstack");
   const output = captureIo();
   const code = await main(
     ["install", "--target", "all", "--scope", "project", "--project-root", projectRoot, "--json"],
     {
       cwd: projectRoot,
       packageRoot: PACKAGE_ROOT,
-      env: { ...process.env, JUSTINSTACK_HOME: runtime, JUSTINSTACK_USER_HOME: fakeHome },
+      env: { ...process.env, JSTACK_HOME: runtime, JSTACK_USER_HOME: fakeHome },
       io: output.io,
     },
   );
@@ -54,22 +54,22 @@ test("CLI install target all in project scope is a true dry run", async (t) => {
     assert.equal(targets.some((target) => target.includes(path.join(projectRoot, platform, "skills"))), true);
     assert.equal(await doesNotExist(path.join(projectRoot, platform)), true);
   }
-  assert.equal(targets.some((target) => target.endsWith(path.join("justinstack-review", "SKILL.md"))), true);
+  assert.equal(targets.some((target) => target.endsWith(path.join("jstack-review", "SKILL.md"))), true);
   assert.equal(await doesNotExist(runtime), true);
 });
 
 test("implicit project scope resolves the Git top level while an explicit root remains exact", async (t) => {
   const fixture = await createGitRepository(t);
   const nested = path.join(fixture.root, "packages", "nested package");
-  const fakeHome = await temporaryDirectory(t, "justinstack-nested-home-");
+  const fakeHome = await temporaryDirectory(t, "jstack-nested-home-");
   await mkdir(nested, { recursive: true });
   const context = {
     cwd: nested,
     packageRoot: PACKAGE_ROOT,
     env: {
       ...process.env,
-      JUSTINSTACK_HOME: path.join(fakeHome, ".justin-stack"),
-      JUSTINSTACK_USER_HOME: fakeHome,
+      JSTACK_HOME: path.join(fakeHome, ".jstack"),
+      JSTACK_USER_HOME: fakeHome,
     },
   };
 
@@ -98,7 +98,7 @@ test("implicit project scope resolves the Git top level while an explicit root r
 });
 
 test("implicit project scope falls back to the current directory outside Git", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack-outside-git-");
+  const root = await temporaryDirectory(t, "jstack-outside-git-");
   const cwd = path.join(root, "plain project");
   const fakeHome = path.join(root, "home");
   await mkdir(cwd, { recursive: true });
@@ -109,8 +109,8 @@ test("implicit project scope falls back to the current directory outside Git", a
       packageRoot: PACKAGE_ROOT,
       env: {
         ...process.env,
-        JUSTINSTACK_HOME: path.join(fakeHome, ".justin-stack"),
-        JUSTINSTACK_USER_HOME: fakeHome,
+        JSTACK_HOME: path.join(fakeHome, ".jstack"),
+        JSTACK_USER_HOME: fakeHome,
       },
       io: output.io,
     }),
@@ -124,7 +124,7 @@ test("implicit project scope falls back to the current directory outside Git", a
 });
 
 test("global platform roots honor CLAUDE_CONFIG_DIR and CODEX_HOME independently of skill discovery", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack-external-config-");
+  const root = await temporaryDirectory(t, "jstack-external-config-");
   const userHome = path.join(root, "user home");
   const claudeConfigDir = path.join(root, "external Claude config");
   const codexHome = path.join(root, "external Codex config");
@@ -135,8 +135,8 @@ test("global platform roots honor CLAUDE_CONFIG_DIR and CODEX_HOME independently
       packageRoot: PACKAGE_ROOT,
       env: {
         ...process.env,
-        JUSTINSTACK_HOME: path.join(root, "runtime"),
-        JUSTINSTACK_USER_HOME: userHome,
+        JSTACK_HOME: path.join(root, "runtime"),
+        JSTACK_USER_HOME: userHome,
         CLAUDE_CONFIG_DIR: claudeConfigDir,
         CODEX_HOME: codexHome,
       },
@@ -156,19 +156,19 @@ test("global platform roots honor CLAUDE_CONFIG_DIR and CODEX_HOME independently
   const proposals = new Map(payload.plan?.configurationProposals?.map((item) => [item.id, item.targetPath]));
   assert.equal(proposals.get("claude-hooks"), path.join(claudeConfigDir, "settings.json"));
   assert.equal(proposals.get("codex-instructions"), path.join(codexHome, "AGENTS.md"));
-  assert.equal(proposals.get("codex-rules"), path.join(codexHome, "rules", "justinstack.rules"));
+  assert.equal(proposals.get("codex-rules"), path.join(codexHome, "rules", "jstack.rules"));
 });
 
 test("doctor target Bob is read-only and emits required verification reminders", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack-doctor-");
+  const root = await temporaryDirectory(t, "jstack-doctor-");
   const output = captureIo();
   const code = await main(["doctor", "--target", "bob", "--scope", "global", "--json"], {
     cwd: root,
     packageRoot: PACKAGE_ROOT,
     env: {
       ...process.env,
-      JUSTINSTACK_HOME: path.join(root, ".justin-stack"),
-      JUSTINSTACK_USER_HOME: root,
+      JSTACK_HOME: path.join(root, ".jstack"),
+      JSTACK_USER_HOME: root,
     },
     io: output.io,
   });
@@ -185,8 +185,8 @@ test("doctor target Bob is read-only and emits required verification reminders",
 });
 
 test("doctor reports legacy and queued checkpoint lock leases", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack-doctor-locks-");
-  const runtime = path.join(root, ".justin-stack");
+  const root = await temporaryDirectory(t, "jstack-doctor-locks-");
+  const runtime = path.join(root, ".jstack");
   const stories = path.join(runtime, "workspaces", "sample-workspace", "stories");
   const token = "12345678-1234-1234-1234-123456789abc";
   await mkdir(stories, { recursive: true });
@@ -202,7 +202,7 @@ test("doctor reports legacy and queued checkpoint lock leases", async (t) => {
     await main(["doctor", "--target", "bob", "--scope", "global", "--json"], {
       cwd: root,
       packageRoot: PACKAGE_ROOT,
-      env: { ...process.env, JUSTINSTACK_HOME: runtime, JUSTINSTACK_USER_HOME: root },
+      env: { ...process.env, JSTACK_HOME: runtime, JSTACK_USER_HOME: root },
       io: output.io,
     }),
     1,
@@ -219,8 +219,8 @@ test("doctor reports legacy and queued checkpoint lock leases", async (t) => {
 });
 
 test("apply emits a complete preflight record before its first write", async (t) => {
-  const root = await temporaryDirectory(t, "justinstack-apply-preview-");
-  const runtime = path.join(root, ".justin-stack");
+  const root = await temporaryDirectory(t, "jstack-apply-preview-");
+  const runtime = path.join(root, ".jstack");
   const skill = path.join(root, ".bob", "skills", "story", "SKILL.md");
   const records: unknown[] = [];
   const io: CliIo = {
@@ -234,7 +234,7 @@ test("apply emits a complete preflight record before its first write", async (t)
     await main(["install", "--target", "bob", "--scope", "global", "--apply", "--json"], {
       cwd: root,
       packageRoot: PACKAGE_ROOT,
-      env: { ...process.env, JUSTINSTACK_HOME: runtime, JUSTINSTACK_USER_HOME: root },
+      env: { ...process.env, JSTACK_HOME: runtime, JSTACK_USER_HOME: root },
       io,
     }),
     0,
@@ -259,13 +259,13 @@ test("CLI safety check refuses permanent mutations without executing them", asyn
 
 test("CLI discovers, labels, and non-destructively migrates a legacy checkpoint", async (t) => {
   const fixture = await createGitRepository(t);
-  const root = await temporaryDirectory(t, "justinstack-legacy-cli-");
-  const newHome = path.join(root, "new home", ".justin-stack");
+  const root = await temporaryDirectory(t, "jstack-legacy-cli-");
+  const newHome = path.join(root, "new home", ".jstack");
   const oldHome = path.join(root, "old home", ".story-stack");
   const seedHome = path.join(root, "checkpoint seed");
   const identity = { projectSlug: "sample-workspace", ticketKey: "DEMO-202" } as const;
   const seedStore = new CheckpointStore({
-    justinStackHome: seedHome,
+    jstackHome: seedHome,
     legacyStateRoot: path.join(seedHome, "legacy state"),
     packageRoot: PACKAGE_ROOT,
   });
@@ -282,7 +282,7 @@ test("CLI discovers, labels, and non-destructively migrates a legacy checkpoint"
 
   const env = {
     ...process.env,
-    JUSTINSTACK_HOME: newHome,
+    JSTACK_HOME: newHome,
     // The compatibility override identifies a non-default old installation.
     STORY_STACK_HOME: oldHome,
   };
@@ -400,12 +400,12 @@ test("CLI discovers, labels, and non-destructively migrates a legacy checkpoint"
 
 test("checkpoint reconciliation JSON exposes counts and identity without repository paths or filenames", async (t) => {
   const fixture = await createGitRepository(t);
-  const stateHome = await temporaryDirectory(t, "justinstack-private-cli-state-");
+  const stateHome = await temporaryDirectory(t, "jstack-private-cli-state-");
   const identity = ["--workspace", "sample-workspace", "--story", "DEMO-304", "--repo", fixture.root] as const;
   const context = {
     cwd: fixture.root,
     packageRoot: PACKAGE_ROOT,
-    env: { ...process.env, JUSTINSTACK_HOME: stateHome, STORY_STACK_HOME: undefined },
+    env: { ...process.env, JSTACK_HOME: stateHome, STORY_STACK_HOME: undefined },
   };
 
   let output = captureIo();

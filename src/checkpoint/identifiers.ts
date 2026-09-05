@@ -8,7 +8,7 @@ const TICKET_PATTERN = /^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,11}$/;
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const PATH_LIKE = /[\\/\0-\x1f\x7f:%]/;
 
-const REPOSITORY_ID_DOMAIN = "justinstack-repository-v1\0";
+const REPOSITORY_ID_DOMAIN = "jstack-repository-v1\0";
 
 function rejectPathLikeInput(value: string, label: string): void {
   const candidate = value.trim();

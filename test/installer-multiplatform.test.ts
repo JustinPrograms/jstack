@@ -33,17 +33,17 @@ interface InstallFixture {
   root: string;
   userHome: string;
   projectRoot: string;
-  justinStackHome: string;
+  jstackHome: string;
 }
 
 async function installFixture(t: TestContext, prefix: string): Promise<InstallFixture> {
   const root = await temporaryDirectory(t, prefix);
   const userHome = path.join(root, "User Home With Spaces");
   const projectRoot = path.join(root, "Project With Spaces");
-  const justinStackHome = path.join(userHome, ".justin-stack");
+  const jstackHome = path.join(userHome, ".jstack");
   await mkdir(userHome, { recursive: true });
   await mkdir(projectRoot, { recursive: true });
-  return { root, userHome, projectRoot, justinStackHome };
+  return { root, userHome, projectRoot, jstackHome };
 }
 
 function options(
@@ -55,7 +55,7 @@ function options(
     packageRoot: PACKAGE_ROOT,
     userHome: fixture.userHome,
     projectRoot: fixture.projectRoot,
-    justinStackHome: fixture.justinStackHome,
+    jstackHome: fixture.jstackHome,
     target,
     scope,
   };
@@ -133,8 +133,8 @@ async function assertCanonicalSkillsAreByteIdentical(
 
   const canonicalPolicy = await readFile(path.join(PACKAGE_ROOT, "policies", "checkpoint-protocol.md"));
   for (const installedPolicy of [
-    path.join(fixture.justinStackHome, "policies", "checkpoint-protocol.md"),
-    path.join(fixture.justinStackHome, "runtime", "policies", "checkpoint-protocol.md"),
+    path.join(fixture.jstackHome, "policies", "checkpoint-protocol.md"),
+    path.join(fixture.jstackHome, "runtime", "policies", "checkpoint-protocol.md"),
   ]) {
     assert.deepEqual(
       await readFile(installedPolicy),
@@ -145,11 +145,11 @@ async function assertCanonicalSkillsAreByteIdentical(
 }
 
 test("target all project install is a true dry-run and preserves proposal-only configuration", async (t) => {
-  const fixture = await installFixture(t, "justinstack-all-project-");
+  const fixture = await installFixture(t, "jstack-all-project-");
   const sentinels = new Map<string, string>([
     [path.join(fixture.projectRoot, "CLAUDE.md"), "existing Claude instructions\n"],
     [path.join(fixture.projectRoot, ".claude", "settings.local.json"), "{\"existing\":true}\n"],
-    [path.join(fixture.projectRoot, ".bob", "rules", "justinstack.md"), "existing Bob rule\n"],
+    [path.join(fixture.projectRoot, ".bob", "rules", "jstack.md"), "existing Bob rule\n"],
     [path.join(fixture.projectRoot, ".bob", "settings.json"), "{\"existingHook\":true}\n"],
     [path.join(fixture.projectRoot, "AGENTS.md"), "existing Codex instructions\n"],
     [path.join(fixture.projectRoot, ".codex", "config.toml"), "existing = true\n"],
@@ -224,12 +224,12 @@ test("target all project install is a true dry-run and preserves proposal-only c
   assert.equal((await stat(first.manifestPath)).mtimeMs, beforeManifestMtime);
 });
 
-test("hook proposals target the resolved custom JustinStack runtime home", async (t) => {
-  const fixture = await installFixture(t, "justinstack-custom-runtime-hook-");
+test("hook proposals target the resolved custom JStack runtime home", async (t) => {
+  const fixture = await installFixture(t, "jstack-custom-runtime-hook-");
   const customRuntime = path.join(fixture.userHome, "Custom Runtime Home");
   const plan = await planInstall({
     ...options(fixture, "claude", "global"),
-    justinStackHome: customRuntime,
+    jstackHome: customRuntime,
   });
   const proposal = plan.configurationProposals.find((candidate) => candidate.id === "claude-hooks");
   assert.ok(proposal);
@@ -246,7 +246,7 @@ test("hook proposals target the resolved custom JustinStack runtime home", async
 
 for (const target of ["claude", "bob", "codex"] as const) {
   test(`${target} global install uses the exact requested root and remains target-isolated`, async (t) => {
-    const fixture = await installFixture(t, `justinstack-${target}-global-`);
+    const fixture = await installFixture(t, `jstack-${target}-global-`);
     const input = options(fixture, target, "global");
     const plan = await planInstall(input);
     const expectedRoot = path.join(fixture.userHome, PLATFORM_MARKERS[target], "skills");
@@ -275,7 +275,7 @@ for (const target of ["claude", "bob", "codex"] as const) {
 }
 
 test("sequential global target installs preserve earlier manifest records and files", async (t) => {
-  const fixture = await installFixture(t, "justinstack-sequential-global-");
+  const fixture = await installFixture(t, "jstack-sequential-global-");
   const expectedKeys: string[] = [];
   for (const target of ["claude", "bob", "codex"] as const) {
     const result = await applyInstall(options(fixture, target, "global"));
@@ -305,7 +305,7 @@ test("sequential global target installs preserve earlier manifest records and fi
 });
 
 test("unmanaged skill collision reports only hashes and metadata and refuses before partial writes", async (t) => {
-  const fixture = await installFixture(t, "justinstack-collision-diff-");
+  const fixture = await installFixture(t, "jstack-collision-diff-");
   const collisionPath = path.join(fixture.userHome, ".bob", "skills", "story", "SKILL.md");
   await mkdir(path.dirname(collisionPath), { recursive: true });
   await writeFile(collisionPath, "user-owned sentinel\n", "utf8");
@@ -321,17 +321,17 @@ test("unmanaged skill collision reports only hashes and metadata and refuses bef
   assert.match(collisionEntry?.diff ?? "", /sha256:/u);
   assert.doesNotMatch(collisionEntry?.diff ?? "", /user-owned sentinel/u);
   const formatted = formatInstallPlan(plan);
-  assert.match(formatted, /Unmanaged existing files require --confirm-overwrite JUSTINSTACK/u);
+  assert.match(formatted, /Unmanaged existing files require --confirm-overwrite JSTACK/u);
   assert.doesNotMatch(formatted, /user-owned sentinel/u);
 
   await assert.rejects(applyInstall(plan), /explicit overwrite confirmation/u);
   assert.equal(await readFile(collisionPath, "utf8"), "user-owned sentinel\n");
   assert.equal(await exists(plan.manifestPath), false);
-  assert.equal(await exists(path.join(fixture.justinStackHome, "bin", "justinstack.js")), false);
+  assert.equal(await exists(path.join(fixture.jstackHome, "bin", "jstack.js")), false);
 });
 
 test("an explicitly replaced file receives a durable pre-image backup", async (t) => {
-  const fixture = await installFixture(t, "justinstack-durable-backup-");
+  const fixture = await installFixture(t, "jstack-durable-backup-");
   const collisionPath = path.join(fixture.userHome, ".claude", "skills", "story", "SKILL.md");
   await mkdir(path.dirname(collisionPath), { recursive: true });
   await writeFile(collisionPath, "user-owned pre-image\n", "utf8");
@@ -359,7 +359,7 @@ test("an explicitly replaced file receives a durable pre-image backup", async (t
 });
 
 test("a pre-existing byte-identical file is never silently adopted as installer-owned", async (t) => {
-  const fixture = await installFixture(t, "justinstack-identical-unowned-");
+  const fixture = await installFixture(t, "jstack-identical-unowned-");
   const existingSkill = path.join(fixture.userHome, ".claude", "skills", "story", "SKILL.md");
   const canonicalBytes = await readFile(path.join(PACKAGE_ROOT, "skills", "story", "SKILL.md"));
   await mkdir(path.dirname(existingSkill), { recursive: true });
@@ -386,7 +386,7 @@ test("a pre-existing byte-identical file is never silently adopted as installer-
 });
 
 test("uninstall uses the recorded custom root and never guesses the current default root", async (t) => {
-  const fixture = await installFixture(t, "justinstack-recorded-root-");
+  const fixture = await installFixture(t, "jstack-recorded-root-");
   const customRoot = path.join(fixture.userHome, "Custom Global Claude Skills");
   const installOptions: InstallerOptions = {
     ...options(fixture, "claude", "global"),
@@ -416,7 +416,7 @@ test("uninstall uses the recorded custom root and never guesses the current defa
 });
 
 test("Claude installs outside user home through CLAUDE_CONFIG_DIR can be uninstalled", async (t) => {
-  const fixture = await installFixture(t, "justinstack-external-claude-config-");
+  const fixture = await installFixture(t, "jstack-external-claude-config-");
   const claudeConfigDir = path.join(fixture.root, "External Claude Config");
   const installOptions: InstallerOptions = {
     ...options(fixture, "claude", "global"),
@@ -437,7 +437,7 @@ test("Claude installs outside user home through CLAUDE_CONFIG_DIR can be uninsta
 });
 
 test("a removed canonical file is planned and removed when its installed hash still matches", async (t) => {
-  const fixture = await installFixture(t, "justinstack-obsolete-clean-");
+  const fixture = await installFixture(t, "jstack-obsolete-clean-");
   const packageRoot = await mutablePackageCopy(fixture, "Mutable Package Clean");
   const canonicalObsolete = path.join(packageRoot, "skills", "story", "references", "removed-in-v2.md");
   await mkdir(path.dirname(canonicalObsolete), { recursive: true });
@@ -446,7 +446,7 @@ test("a removed canonical file is planned and removed when its installed hash st
   await applyInstall(v1);
 
   const installedSkill = path.join(fixture.userHome, ".claude", "skills", "story", "references", "removed-in-v2.md");
-  const installedRuntime = path.join(fixture.justinStackHome, "runtime", "skills", "story", "references", "removed-in-v2.md");
+  const installedRuntime = path.join(fixture.jstackHome, "runtime", "skills", "story", "references", "removed-in-v2.md");
   assert.equal(await exists(installedSkill), true);
   assert.equal(await exists(installedRuntime), true);
   await rm(canonicalObsolete);
@@ -475,7 +475,7 @@ test("a removed canonical file is planned and removed when its installed hash st
 });
 
 test("a modified obsolete canonical file is preserved, retained in the manifest, and reported by doctor", async (t) => {
-  const fixture = await installFixture(t, "justinstack-obsolete-modified-");
+  const fixture = await installFixture(t, "jstack-obsolete-modified-");
   const packageRoot = await mutablePackageCopy(fixture, "Mutable Package Modified");
   const canonicalObsolete = path.join(packageRoot, "skills", "story", "references", "removed-in-v2.md");
   await mkdir(path.dirname(canonicalObsolete), { recursive: true });
@@ -511,7 +511,7 @@ test("a modified obsolete canonical file is preserved, retained in the manifest,
 });
 
 test("dry-run refuses an intermediate link under a default skill destination without traversing it", async (t) => {
-  const fixture = await installFixture(t, "justinstack-link-trap-");
+  const fixture = await installFixture(t, "jstack-link-trap-");
   const trapRoot = path.join(fixture.root, "Link Trap");
   const linkPath = path.join(fixture.userHome, ".claude", "skills");
   const sentinelPath = path.join(trapRoot, "story", "SKILL.md");
@@ -545,7 +545,7 @@ test("dry-run refuses an intermediate link under a default skill destination wit
 });
 
 test("concurrent different-target uninstalls serialize manifest updates without losing the remaining record", async (t) => {
-  const fixture = await installFixture(t, "justinstack-concurrent-uninstall-");
+  const fixture = await installFixture(t, "jstack-concurrent-uninstall-");
   await applyInstall(options(fixture, "all", "global"));
 
   const [claudeResult, bobResult] = await Promise.all([
@@ -555,7 +555,7 @@ test("concurrent different-target uninstalls serialize manifest updates without 
   assert.equal(claudeResult.manifestRemoved, false);
   assert.equal(bobResult.manifestRemoved, false);
 
-  const manifestPath = path.join(fixture.justinStackHome, "install-manifest.json");
+  const manifestPath = path.join(fixture.jstackHome, "install-manifest.json");
   const manifest = parseInstallManifest(await readFile(manifestPath, "utf8"));
   assert.equal(manifest.schema_version, 2);
   if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
@@ -563,14 +563,14 @@ test("concurrent different-target uninstalls serialize manifest updates without 
   assert.equal(await exists(path.join(fixture.userHome, ".claude", "skills", "story", "SKILL.md")), false);
   assert.equal(await exists(path.join(fixture.userHome, ".bob", "skills", "story", "SKILL.md")), false);
   assert.equal(await exists(path.join(fixture.userHome, ".agents", "skills", "story", "SKILL.md")), true);
-  assert.equal(await exists(path.join(fixture.justinStackHome, "bin", "justinstack.js")), true);
+  assert.equal(await exists(path.join(fixture.jstackHome, "bin", "jstack.js")), true);
 });
 
 test("collision diffs are bounded and terminal control characters are escaped", async (t) => {
-  const fixture = await installFixture(t, "justinstack-safe-diff-");
+  const fixture = await installFixture(t, "jstack-safe-diff-");
   const skillsRoot = path.join(fixture.userHome, ".bob", "skills");
   const largePath = path.join(skillsRoot, "story", "SKILL.md");
-  const controlledPath = path.join(skillsRoot, "justinstack-review", "SKILL.md");
+  const controlledPath = path.join(skillsRoot, "jstack-review", "SKILL.md");
   const largeBytes = Buffer.concat([
     Buffer.from("large collision with terminal control: \u001b[31m", "utf8"),
     Buffer.alloc(64 * 1024, 0x41),
@@ -597,7 +597,7 @@ test("collision diffs are bounded and terminal control characters are escaped", 
 });
 
 test("skill packages preserve optional frontmatter and recursive references, scripts, and assets", async (t) => {
-  const fixture = await installFixture(t, "justinstack-skill-resources-");
+  const fixture = await installFixture(t, "jstack-skill-resources-");
   const packageRoot = await mutablePackageCopy(fixture, "Package With Skill Resources");
   const storyRoot = path.join(packageRoot, "skills", "story");
   await writeFile(path.join(storyRoot, "SKILL.md"), `---
@@ -610,7 +610,7 @@ compatibility: |-
   Requires Node.js 20.
 metadata:
   owner: >-
-    justinstack-test
+    jstack-test
   note: ""
 allowed-tools: Read Bash(git:*)
 ---
@@ -645,7 +645,7 @@ allowed-tools: Read Bash(git:*)
 });
 
 test("skill package validation rejects names that mismatch the directory or contain consecutive hyphens", async (t) => {
-  const fixture = await installFixture(t, "justinstack-invalid-skill-name-");
+  const fixture = await installFixture(t, "jstack-invalid-skill-name-");
   const packageRoot = await mutablePackageCopy(fixture, "Package With Invalid Skill");
   const skillPath = path.join(packageRoot, "skills", "story", "SKILL.md");
   await writeFile(skillPath, `---
@@ -657,7 +657,7 @@ description: This invalid name must be rejected before any install target is wri
 `, "utf8");
   const input = versionedOptions(fixture, packageRoot, "3.0.0");
   await assert.rejects(planInstall(input), /name must match its directory/iu);
-  assert.equal(await exists(fixture.justinStackHome), false);
+  assert.equal(await exists(fixture.jstackHome), false);
 
   await writeFile(skillPath, `---
 name: story
@@ -668,11 +668,11 @@ metadata:
 # Invalid metadata
 `, "utf8");
   await assert.rejects(planInstall(input), /metadata must be a string mapping, not null/iu);
-  assert.equal(await exists(fixture.justinStackHome), false);
+  assert.equal(await exists(fixture.jstackHome), false);
 });
 
 test("a journaled pre-manifest crash adopts only entries with durable applied markers", async (t) => {
-  const fixture = await installFixture(t, "justinstack-journal-recovery-");
+  const fixture = await installFixture(t, "jstack-journal-recovery-");
   const input = options(fixture, "bob", "global");
   const unownedPath = path.join(fixture.userHome, ".bob", "skills", "resume-story", "SKILL.md");
   const canonicalUnowned = await readFile(path.join(PACKAGE_ROOT, "skills", "resume-story", "SKILL.md"));
@@ -687,7 +687,7 @@ test("a journaled pre-manifest crash adopts only entries with durable applied ma
     applyInstall(input, { testOnlyAbortAfterMutations: beforeManifestMutation }),
     /Simulated abrupt installer termination/u,
   );
-  const journalPath = path.join(fixture.justinStackHome, INSTALL_TRANSACTION_FILENAME);
+  const journalPath = path.join(fixture.jstackHome, INSTALL_TRANSACTION_FILENAME);
   assert.equal(await exists(journalPath), true);
   assert.equal(await exists(plan.manifestPath), false);
 
@@ -705,7 +705,7 @@ test("a journaled pre-manifest crash adopts only entries with durable applied ma
 });
 
 test("recovery revalidates applied targets before committing its manifest", async (t) => {
-  const fixture = await installFixture(t, "justinstack-recovery-manifest-race-");
+  const fixture = await installFixture(t, "jstack-recovery-manifest-race-");
   const input = options(fixture, "bob", "global");
   const plan = await planInstall(input);
   const beforeManifestMutation = plan.entries.filter((entry) =>
@@ -714,7 +714,7 @@ test("recovery revalidates applied targets before committing its manifest", asyn
     applyInstall(input, { testOnlyAbortAfterMutations: beforeManifestMutation }),
     /Simulated abrupt installer termination/u,
   );
-  const journalPath = path.join(fixture.justinStackHome, INSTALL_TRANSACTION_FILENAME);
+  const journalPath = path.join(fixture.jstackHome, INSTALL_TRANSACTION_FILENAME);
   const victim = plan.entries.find((entry) => entry.kind !== "manifest" && entry.action === "create");
   assert.ok(victim);
   const externalBytes = "external recovery writer\n";
@@ -732,7 +732,7 @@ test("recovery revalidates applied targets before committing its manifest", asyn
 });
 
 test("a non-cooperating target edit is detected before manifest commit and preserved", async (t) => {
-  const fixture = await installFixture(t, "justinstack-pre-manifest-race-");
+  const fixture = await installFixture(t, "jstack-pre-manifest-race-");
   const input = options(fixture, "claude", "global");
   const plan = await planInstall(input);
   const victim = plan.entries.find((entry) => entry.kind !== "manifest" && entry.action === "create");
@@ -751,7 +751,7 @@ test("a non-cooperating target edit is detected before manifest commit and prese
 });
 
 test("an unmarked pending create that independently appears is preserved and remains unowned", async (t) => {
-  const fixture = await installFixture(t, "justinstack-journal-ambiguous-");
+  const fixture = await installFixture(t, "jstack-journal-ambiguous-");
   const input = options(fixture, "claude", "global");
   const initialPlan = await planInstall(input);
   const orderedTargets = initialPlan.entries.filter((entry) =>
@@ -775,7 +775,7 @@ test("an unmarked pending create that independently appears is preserved and rem
   const manifest = parseInstallManifest(await readFile(initialPlan.manifestPath, "utf8"));
   assert.equal(manifest.schema_version, 2);
   if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
-  const owned = pendingEntry.root === "justinstack"
+  const owned = pendingEntry.root === "jstack"
     ? manifest.runtime_entries
     : manifest.installations.find((entry) => entry.key === pendingEntry.installationKey)?.entries ?? [];
   assert.equal(owned.some((entry) => entry.path === pendingEntry.relativePath), false);
@@ -786,7 +786,7 @@ test("executable mode is established before an atomic target rename", async (t) 
     t.skip("POSIX executable modes are not meaningful on Windows");
     return;
   }
-  const fixture = await installFixture(t, "justinstack-pre-rename-mode-");
+  const fixture = await installFixture(t, "jstack-pre-rename-mode-");
   const input = options(fixture, "claude", "global");
   const plan = await planInstall(input);
   const ordered = [
@@ -796,7 +796,7 @@ test("executable mode is established before an atomic target rename", async (t) 
     ...plan.entries.filter((entry) => entry.kind === "manifest" &&
       (entry.action === "create" || entry.action === "replace")),
   ];
-  const launcher = path.join(fixture.justinStackHome, "bin", "justinstack");
+  const launcher = path.join(fixture.jstackHome, "bin", "jstack");
   const launcherIndex = ordered.findIndex((entry) => entry.targetPath === launcher);
   assert.notEqual(launcherIndex, -1);
   await assert.rejects(
@@ -809,10 +809,10 @@ test("executable mode is established before an atomic target rename", async (t) 
 });
 
 test("stale dead-pid installer locks are reclaimed without deleting live contenders", async (t) => {
-  const fixture = await installFixture(t, "justinstack-stale-installer-lock-");
+  const fixture = await installFixture(t, "jstack-stale-installer-lock-");
   const lockBase = path.join(
-    path.dirname(fixture.justinStackHome),
-    `.${path.basename(fixture.justinStackHome)}.installer.lock`,
+    path.dirname(fixture.jstackHome),
+    `.${path.basename(fixture.jstackHome)}.installer.lock`,
   );
   await writeFile(lockBase, `${JSON.stringify({
     pid: 2_147_483_647,
@@ -842,10 +842,10 @@ test("stale dead-pid installer locks are reclaimed without deleting live contend
 });
 
 test("malformed installer queue artifacts block while fresh and recover only after aging", async (t) => {
-  const fixture = await installFixture(t, "justinstack-malformed-installer-lock-");
+  const fixture = await installFixture(t, "jstack-malformed-installer-lock-");
   const lockBase = path.join(
-    path.dirname(fixture.justinStackHome),
-    `.${path.basename(fixture.justinStackHome)}.installer.lock`,
+    path.dirname(fixture.jstackHome),
+    `.${path.basename(fixture.jstackHome)}.installer.lock`,
   );
   const token = "11111111-1111-4111-8111-111111111111";
   const ticket = `${lockBase}.ticket.1.${token}`;
@@ -874,14 +874,14 @@ test("malformed installer queue artifacts block while fresh and recover only aft
 });
 
 test("doctor validates runtime bytes, types, modes, and manifest ownership completeness", async (t) => {
-  const fixture = await installFixture(t, "justinstack-doctor-runtime-");
+  const fixture = await installFixture(t, "jstack-doctor-runtime-");
   const input = options(fixture, "claude", "global");
   const install = await applyInstall(input);
   const [healthy] = await inspectPlatformInstallations(input);
   assert.equal(healthy?.ok, true);
-  assert.equal(healthy?.installed.some((entry) => entry.startsWith(`${fixture.justinStackHome}${path.sep}`)), true);
+  assert.equal(healthy?.installed.some((entry) => entry.startsWith(`${fixture.jstackHome}${path.sep}`)), true);
 
-  const runtimePackage = path.join(fixture.justinStackHome, "runtime", "package.json");
+  const runtimePackage = path.join(fixture.jstackHome, "runtime", "package.json");
   const runtimePackageBytes = await readFile(runtimePackage);
   await writeFile(runtimePackage, "{\"tampered\":true}\n", "utf8");
   const [wrongBytes] = await inspectPlatformInstallations(input);
@@ -892,8 +892,8 @@ test("doctor validates runtime bytes, types, modes, and manifest ownership compl
   const manifest = parseInstallManifest(await readFile(install.manifestPath, "utf8"));
   assert.equal(manifest.schema_version, 2);
   if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
-  const ownershipPath = "bin/justinstack.js";
-  const ownershipTarget = path.join(fixture.justinStackHome, ...ownershipPath.split("/"));
+  const ownershipPath = "bin/jstack.js";
+  const ownershipTarget = path.join(fixture.jstackHome, ...ownershipPath.split("/"));
   manifest.runtime_entries = manifest.runtime_entries.filter((entry) => entry.path !== ownershipPath);
   await writeFile(install.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   const [ownershipBroken] = await inspectPlatformInstallations(input);
@@ -906,14 +906,14 @@ test("doctor validates runtime bytes, types, modes, and manifest ownership compl
   const [missingRuntime] = await inspectPlatformInstallations(input);
   assert.equal(missingRuntime?.missing.includes(missingTarget), true);
 
-  const typeTarget = path.join(fixture.justinStackHome, "runtime", "templates", "context.v1.md");
+  const typeTarget = path.join(fixture.jstackHome, "runtime", "templates", "context.v1.md");
   await rm(typeTarget);
   await mkdir(typeTarget);
   const [wrongType] = await inspectPlatformInstallations(input);
   assert.equal(wrongType?.stale.includes(typeTarget), true);
 
   if (process.platform !== "win32") {
-    const launcher = path.join(fixture.justinStackHome, "bin", "justinstack");
+    const launcher = path.join(fixture.jstackHome, "bin", "jstack");
     await chmod(launcher, 0o644);
     const [wrongMode] = await inspectPlatformInstallations(input);
     assert.equal(wrongMode?.stale.includes(launcher), true);
@@ -921,13 +921,13 @@ test("doctor validates runtime bytes, types, modes, and manifest ownership compl
 });
 
 test("legacy managed review paths remain parseable and are removed only when their hashes match", async (t) => {
-  const fixture = await installFixture(t, "justinstack-legacy-review-");
+  const fixture = await installFixture(t, "jstack-legacy-review-");
   const input = options(fixture, "claude", "global");
   const install = await applyInstall(input);
   const legacyBytes = Buffer.from("legacy managed review fixture\n", "utf8");
   const legacyHash = createHash("sha256").update(legacyBytes).digest("hex");
   const skillPath = path.join(fixture.userHome, ".claude", "skills", "review", "SKILL.md");
-  const runtimePath = path.join(fixture.justinStackHome, "runtime", "skills", "review", "SKILL.md");
+  const runtimePath = path.join(fixture.jstackHome, "runtime", "skills", "review", "SKILL.md");
   await mkdir(path.dirname(skillPath), { recursive: true });
   await mkdir(path.dirname(runtimePath), { recursive: true });
   await writeFile(skillPath, legacyBytes);
@@ -950,14 +950,14 @@ test("legacy managed review paths remain parseable and are removed only when the
 });
 
 test("omitted projectRoot resolves the enclosing Git top-level from a nested directory", async (t) => {
-  const fixture = await installFixture(t, "justinstack-nested-git-root-");
+  const fixture = await installFixture(t, "jstack-nested-git-root-");
   await execFileAsync("git", ["init", fixture.projectRoot], { windowsHide: true });
   const nested = path.join(fixture.projectRoot, "packages", "nested");
   await mkdir(nested, { recursive: true });
   const plan = await planInstall({
     packageRoot: PACKAGE_ROOT,
     userHome: fixture.userHome,
-    justinStackHome: fixture.justinStackHome,
+    jstackHome: fixture.jstackHome,
     target: "bob",
     scope: "project",
     cwd: nested,
@@ -967,13 +967,13 @@ test("omitted projectRoot resolves the enclosing Git top-level from a nested dir
 });
 
 test("implicit project-root discovery falls back only outside Git and surfaces unrelated Git failures", async (t) => {
-  const fixture = await installFixture(t, "justinstack-project-root-errors-");
+  const fixture = await installFixture(t, "jstack-project-root-errors-");
   const outsideGit = path.join(fixture.root, "Outside Git");
   await mkdir(outsideGit);
   const plan = await planInstall({
     packageRoot: PACKAGE_ROOT,
     userHome: fixture.userHome,
-    justinStackHome: fixture.justinStackHome,
+    jstackHome: fixture.jstackHome,
     target: "codex",
     scope: "project",
     cwd: outsideGit,
@@ -984,7 +984,7 @@ test("implicit project-root discovery falls back only outside Git and surfaces u
     planInstall({
       packageRoot: PACKAGE_ROOT,
       userHome: fixture.userHome,
-      justinStackHome: fixture.justinStackHome,
+      jstackHome: fixture.jstackHome,
       target: "codex",
       scope: "project",
       cwd: path.join(fixture.root, "missing-directory"),

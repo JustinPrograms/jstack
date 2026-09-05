@@ -1,7 +1,7 @@
 node_modules/
 dist/
 .gstack/
-.justin-stack/
+.jstack/
 .story-stack/
 .worktree/
 coverage/

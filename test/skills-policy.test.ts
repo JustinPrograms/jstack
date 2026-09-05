@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SKILLS = ["story", "plan-eng-review", "implement-story", "justinstack-review", "resume-story"] as const;
+const SKILLS = ["story", "plan-eng-review", "implement-story", "jstack-review", "resume-story"] as const;
 const OPTIONAL_FRONTMATTER = new Set(["license", "compatibility", "metadata", "allowed-tools"]);
 
 async function walk(directory: string): Promise<string[]> {
@@ -97,10 +97,9 @@ test("canonical skills have portable frontmatter and no platform-specific source
     assert.match(parsed.name, /^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/u);
     assert.equal(parsed.description.length >= 20, true);
     assert.equal(parsed.description.length <= 1024, true);
-    assert.match(parsed.body, /JUSTINSTACK_HOME/u);
-    assert.match(parsed.body, /JUSTIN_STACK_HOME/u);
+  assert.match(parsed.body, /JSTACK_HOME/u);
     assert.match(parsed.body, /STORY_STACK_HOME/u);
-    assert.match(parsed.body, /bin\/justinstack\.js/u);
+    assert.match(parsed.body, /bin\/jstack\.js/u);
     assert.match(parsed.body, /do not depend on `PATH`/u);
     assert.match(parsed.body, /policies\/checkpoint-protocol\.md/u);
     assert.match(parsed.body, /coordinating agent/iu);
@@ -131,7 +130,7 @@ description: Exercise every standard optional field.
 license: Apache-2.0
 compatibility: Requires Node.js 20.
 metadata:
-  owner: justinstack
+  owner: jstack
 allowed-tools: Read Bash(git:*)
 ---
 
@@ -142,7 +141,7 @@ allowed-tools: Read Bash(git:*)
 });
 
 test("report-only review leaves checkpoint writes opt-in and recovery discloses abrupt-cutoff limits", async () => {
-  const review = await readFile(path.join(PACKAGE_ROOT, "skills", "justinstack-review", "SKILL.md"), "utf8");
+  const review = await readFile(path.join(PACKAGE_ROOT, "skills", "jstack-review", "SKILL.md"), "utf8");
   assert.match(review, /if and only if the user authorizes local checkpoint writes/iu);
   assert.match(review, /review-only, read-only, or explicitly says not to write[\s\S]*leave the bundle unchanged/iu);
 
@@ -154,13 +153,13 @@ test("report-only review leaves checkpoint writes opt-in and recovery discloses 
 
 test("story composition keeps implementation, review, recovery, and completion ownership distinct", async () => {
   const sources = await Promise.all(
-    ["story", "plan-eng-review", "implement-story", "justinstack-review", "resume-story"].map((skill) =>
+    ["story", "plan-eng-review", "implement-story", "jstack-review", "resume-story"].map((skill) =>
       readFile(path.join(PACKAGE_ROOT, "skills", skill, "SKILL.md"), "utf8"),
     ),
   );
   const [story, planReview, implementation, review, resume] = sources as [string, string, string, string, string];
 
-  const phaseOrder = ["`plan-eng-review`", "`implement-story`", "`justinstack-review`"]
+  const phaseOrder = ["`plan-eng-review`", "`implement-story`", "`jstack-review`"]
     .map((phase) => story.indexOf(phase));
   assert.equal(phaseOrder.every((index) => index >= 0), true);
   assert.equal(phaseOrder[0]! < phaseOrder[1]! && phaseOrder[1]! < phaseOrder[2]!, true);
@@ -194,7 +193,7 @@ test("README documents platform-specific discovery and invocation without contin
   assert.match(readme, /~\/\.agents\/skills\//u);
   assert.doesNotMatch(readme, /\.codex\/skills\//u);
   assert.match(readme, /CLAUDE_CONFIG_DIR/u);
-  assert.match(readme, /\$justinstack-review/u);
+  assert.match(readme, /\$jstack-review/u);
   assert.match(readme, /\$implement-story/u);
   assert.match(readme, /In Bob Shell, type `\$` and select the skill from the picker/iu);
   assert.match(readme, /or use `\/skills`/iu);
@@ -206,7 +205,7 @@ test("README documents platform-specific discovery and invocation without contin
 
 test("shared protocol defines the continuity, privacy, coordination, and safety contracts", async () => {
   const protocol = await readFile(path.join(PACKAGE_ROOT, "policies", "checkpoint-protocol.md"), "utf8");
-  assert.match(protocol, /~\/\.justin-stack\/workspaces\/<workspace-id>\/stories\/<story-id>\//u);
+  assert.match(protocol, /~\/\.jstack\/workspaces\/<workspace-id>\/stories\/<story-id>\//u);
   for (const filename of ["context.md", "decisions.md", "progress.md", "checks.md", "handoff.md", "state.json"]) {
     assert.equal(protocol.includes(`\`${filename}\``), true);
   }

@@ -116,7 +116,7 @@ test("permanent remote-mutation restrictions are refused", () => {
     "\"C:\\Program Files\\Git\\cmd\\git.exe\" push origin feature",
     "git -c alias.ship=push ship origin feature",
     "git -calias.ship=push ship origin feature",
-    "git --config-env=alias.ship=JUSTINSTACK_ALIAS ship origin feature",
+    "git --config-env=alias.ship=JSTACK_ALIAS ship origin feature",
     "git send-pack origin HEAD:refs/heads/feature",
     "git remote set-url origin https://example.invalid/repo.git",
     "git config --global user.email sample@example.invalid",

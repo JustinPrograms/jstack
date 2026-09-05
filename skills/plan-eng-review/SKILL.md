@@ -1,18 +1,18 @@
 ---
 name: plan-eng-review
-description: Challenge and finalize a JustinStack implementation plan through an interactive engineering review. Use after story discovery and before implementation; this skill does not edit application code.
+description: Challenge and finalize a JStack implementation plan through an interactive engineering review. Use after story discovery and before implementation; this skill does not edit application code.
 ---
 
 # Plan Engineering Review
 
-Turn a draft plan into an implementation-ready plan whose material tradeoffs the user has chosen deliberately. Stay in planning mode: inspect local files and update JustinStack state, but do not edit application source, tests, generated artifacts, repository configuration, or Git history.
+Turn a draft plan into an implementation-ready plan whose material tradeoffs the user has chosen deliberately. Stay in planning mode: inspect local files and update JStack state, but do not edit application source, tests, generated artifacts, repository configuration, or Git history.
 
-Before acting, resolve the JustinStack runtime home from the first non-empty value of `JUSTINSTACK_HOME`, `JUSTIN_STACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.justin-stack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/justinstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `justinstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available. Platform capabilities never weaken that protocol.
+Before acting, resolve the JStack runtime home from the first non-empty value of `JSTACK_HOME`, `JSTACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.jstack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/jstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `jstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available. Platform capabilities never weaken that protocol.
 
 ## Establish the review target
 
 1. Resolve the canonical repository and explicit workspace/story identity.
-2. Read the bundle with `justinstack state show`, then run `state validate --json` using `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path>`.
+2. Read the bundle with `jstack state show`, then run `state validate --json` using `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path>`.
 3. Stop on a repository or branch mismatch. Reconcile same-branch drift only from local evidence.
 4. Use the draft supplied by the user or recorded in current work. Treat an approved plan as authoritative only when the saved status confirms its approval. If no draft exists, ask for one or recommend the story workflow.
 5. Read only the repository guidance, comparable implementation, relevant interfaces, and nearby tests needed to challenge the plan. Do not repeat discovery supported by current state.
@@ -69,14 +69,14 @@ Prefer the smallest complete, testable plan consistent with repository patterns.
 
 ## Maintain state and request approval
 
-While choices remain open, keep status at planning and leave the approved plan unchanged. Save meaningful progress through `justinstack state update` using a complete temporary body and the explicit identity/repository arguments. Keep the draft in current work, accepted choices in decisions, open matters in blockers, and the pending decision as the exact next action. Preserve every approval gate and delete the temporary file after success or failure.
+While choices remain open, keep status at planning and leave the approved plan unchanged. Save meaningful progress through `jstack state update` using a complete temporary body and the explicit identity/repository arguments. Keep the draft in current work, accepted choices in decisions, open matters in blockers, and the pending decision as the exact next action. Preserve every approval gate and delete the temporary file after success or failure.
 
 When the review is stable, show the complete plan and ask for explicit approval to use it for implementation. Approval of one decision or a requested revision is not approval of the whole plan.
 
 Only after explicit full-plan approval:
 
 1. Prepare a complete body with the final plan, no material blocker, preserved gates, and invocation of `implement-story` for the first coding step.
-2. Run `justinstack state approve-plan` with `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path> --body-file <temporary-body.md> --confirm-user-approved`.
+2. Run `jstack state approve-plan` with `--workspace <workspace-id> --story <story-id> --repo <absolute-repository-path> --body-file <temporary-body.md> --confirm-user-approved`.
 3. Remove the temporary file after success or failure.
 4. Validate again and report the resolved bundle path.
 

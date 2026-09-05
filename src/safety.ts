@@ -224,7 +224,7 @@ function executableName(word: string | undefined): string {
 
 function recurseExecutableWords(words: readonly string[], depth: number): string[][] {
   if (words.length === 0) return [];
-  if (depth >= 32) return [["__justinstack_uninspectable_wrapper__"]];
+  if (depth >= 32) return [["__jstack_uninspectable_wrapper__"]];
   return unwrapExecutableWords([...words], depth + 1);
 }
 
@@ -466,7 +466,7 @@ function unwrapExecutableWords(words: string[], depth = 0): string[][] {
       const lower = word.toLowerCase();
       return lower.length >= 2 && "-encodedcommand".startsWith(lower);
     });
-    if (encoded) return [["__justinstack_uninspectable_wrapper__"]];
+    if (encoded) return [["__jstack_uninspectable_wrapper__"]];
     const marker = words.findIndex((word, index) => {
       if (index === 0) return false;
       const lower = word.toLowerCase();
@@ -672,52 +672,52 @@ function matchesAtCommandStart(pattern: RegExp, commands: readonly string[]): bo
 const DENIED_RULES: readonly { pattern: RegExp; reason: string; rule: string }[] = [
   {
     pattern: /(?:^|[;&|()"']\s*)git\s+push(?:\s|$)/iu,
-    reason: "JustinStack never pushes Git changes.",
+    reason: "JStack never pushes Git changes.",
     rule: "git-push",
   },
   {
     pattern: /(?:^|[;&|()"']\s*)git\s+send-pack(?:\s|$)/iu,
-    reason: "JustinStack never pushes Git changes through git send-pack.",
+    reason: "JStack never pushes Git changes through git send-pack.",
     rule: "git-push",
   },
   {
     pattern: /(?:^|[;&|()"']\s*)git\s+remote\s+(?:add|remove|rename|set-head|set-branches|set-url)(?:\s|$)/iu,
-    reason: "JustinStack never changes Git remotes.",
+    reason: "JStack never changes Git remotes.",
     rule: "git-remote-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)(?:gh\s+pr|glab\s+mr)\s+(?:create|edit|update|comment|note|close|merge|reopen|review|approve|ready|revoke)(?:\s|$)/iu,
-    reason: "JustinStack never creates or mutates pull or merge requests.",
+    reason: "JStack never creates or mutates pull or merge requests.",
     rule: "pull-request-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)(?:gh|glab)\s+(?:issue|api)\s+(?:create|edit|update|comment|note|close|reopen|delete|move|transfer|lock|unlock|pin|unpin|post|put|patch)(?:\s|$)/iu,
-    reason: "JustinStack never mutates tickets or remote service data.",
+    reason: "JStack never mutates tickets or remote service data.",
     rule: "remote-service-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)(?:jira|jira-cli)\s+(?:(?:issue|project)\s+)?(?:create|edit|update|assign|comment|close|reopen|transition|delete|move)(?:\s|$)/iu,
-    reason: "JustinStack never mutates Jira or another ticket service.",
+    reason: "JStack never mutates Jira or another ticket service.",
     rule: "ticket-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)gh\s+(?:release\s+(?:create|delete|edit|upload)|repo\s+(?:archive|create|delete|edit|fork|rename|sync)|run\s+(?:cancel|delete|rerun)|workflow\s+(?:disable|enable|run)|(?:secret|variable)\s+(?:delete|set)|label\s+(?:clone|create|delete|edit))(?:\s|$)/iu,
-    reason: "JustinStack never creates or mutates remote releases or repositories.",
+    reason: "JStack never creates or mutates remote releases or repositories.",
     rule: "remote-service-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)glab\s+(?:release\s+(?:create|delete|upload)|repo\s+(?:archive|create|delete|fork|mirror)|ci\s+(?:cancel|retry|run)|variable\s+(?:delete|set|update))(?:\s|$)/iu,
-    reason: "JustinStack never creates or mutates remote GitLab resources.",
+    reason: "JStack never creates or mutates remote GitLab resources.",
     rule: "remote-service-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)gh\s+(?:gist\s+(?:create|delete|edit)|cache\s+delete|codespace\s+(?:create|delete|edit|rebuild|stop)|project\s+(?:close|copy|create|delete|edit|item-add|item-archive|item-create|item-delete|item-edit|link|unlink))(?:\s|$)/iu,
-    reason: "JustinStack never creates or mutates remote GitHub resources.",
+    reason: "JStack never creates or mutates remote GitHub resources.",
     rule: "remote-service-mutation",
   },
   {
     pattern: /(?:^|[;&|()]\s*)glab\s+snippet\s+(?:create|delete|update)(?:\s|$)/iu,
-    reason: "JustinStack never creates or mutates remote GitLab resources.",
+    reason: "JStack never creates or mutates remote GitLab resources.",
     rule: "remote-service-mutation",
   },
 ];
@@ -742,7 +742,7 @@ export function classifyCommand(command: string | readonly string[]): SafetyDeci
   if (interpretations.some((interpretation) => configuresGitAlias(normalizedCommand(interpretation, false)))) {
     return {
       disposition: "deny",
-      reason: "JustinStack does not execute commands through temporary Git aliases because they can hide remote mutations.",
+      reason: "JStack does not execute commands through temporary Git aliases because they can hide remote mutations.",
       rule: "git-alias",
     };
   }
@@ -751,10 +751,10 @@ export function classifyCommand(command: string | readonly string[]): SafetyDeci
     return { disposition: "allow", reason: "No command was supplied.", rule: "empty-command" };
   }
   const executableCommands = normalizedCommands.flatMap((normalized) => shellSegments(normalized));
-  if (executableCommands.some((candidate) => candidate === "__justinstack_uninspectable_wrapper__")) {
+  if (executableCommands.some((candidate) => candidate === "__jstack_uninspectable_wrapper__")) {
     return {
       disposition: "deny",
-      reason: "JustinStack cannot safely inspect an encoded shell command.",
+      reason: "JStack cannot safely inspect an encoded shell command.",
       rule: "uninspectable-wrapper",
     };
   }
@@ -766,21 +766,21 @@ export function classifyCommand(command: string | readonly string[]): SafetyDeci
   if (normalizedCommands.some((normalized) => cliApiMutates(normalized))) {
     return {
       disposition: "deny",
-      reason: "JustinStack never sends mutating GitHub API requests.",
+      reason: "JStack never sends mutating GitHub API requests.",
       rule: "remote-service-mutation",
     };
   }
   if (normalizedCommands.some((normalized) => httpCommandMutates(normalized))) {
     return {
       disposition: "deny",
-      reason: "JustinStack never sends mutating HTTP requests to remote services.",
+      reason: "JStack never sends mutating HTTP requests to remote services.",
       rule: "http-mutation",
     };
   }
   if (normalizedCommands.some((normalized) => gitConfigMutates(normalized))) {
     return {
       disposition: "deny",
-      reason: "JustinStack never changes Git configuration.",
+      reason: "JStack never changes Git configuration.",
       rule: "git-config-mutation",
     };
   }
@@ -795,7 +795,7 @@ export function classifyCommand(command: string | readonly string[]): SafetyDeci
   }
   return {
     disposition: "allow",
-    reason: "No permanent JustinStack restriction matched. Normal user authorization still applies.",
+    reason: "No permanent JStack restriction matched. Normal user authorization still applies.",
     rule: "no-match",
   };
 }

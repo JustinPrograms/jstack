@@ -204,7 +204,7 @@ async function installerEnvironmentOptions(
 ): Promise<{
   packageRoot: string;
   userHome: string;
-  justinStackHome: string;
+  jstackHome: string;
   target: TargetSelection;
   scope: InstallScope;
   projectRoot: string;
@@ -213,8 +213,8 @@ async function installerEnvironmentOptions(
   codexHome?: string;
 }> {
   const { target, scope } = targetAndScope(parsed);
-  const userHome = path.resolve(context.cwd, context.env.JUSTINSTACK_USER_HOME ?? os.homedir());
-  const justinStackHome = defaultStoryStackHome(context.env);
+  const userHome = path.resolve(context.cwd, context.env.JSTACK_USER_HOME ?? os.homedir());
+  const jstackHome = defaultStoryStackHome(context.env);
   const explicitProjectRoot = stringOption(parsed, "project-root");
   const projectRoot = explicitProjectRoot === undefined
     ? await implicitProjectRoot(scope, context.cwd)
@@ -225,24 +225,24 @@ async function installerEnvironmentOptions(
   const codexHome = context.env.CODEX_HOME
     ? path.resolve(context.cwd, context.env.CODEX_HOME)
     : undefined;
-  const explicitClaudeSkills = context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME ?? context.env.STORY_STACK_SKILLS_HOME;
+  const explicitClaudeSkills = context.env.JSTACK_CLAUDE_SKILLS_HOME ?? context.env.STORY_STACK_SKILLS_HOME;
   const skillRoots = {
     ...(explicitClaudeSkills
       ? { claude: path.resolve(context.cwd, explicitClaudeSkills) }
       : scope === "global" && claudeConfigDir !== undefined
         ? { claude: path.join(claudeConfigDir, "skills") }
       : {}),
-    ...(context.env.JUSTINSTACK_BOB_SKILLS_HOME
-      ? { bob: path.resolve(context.cwd, context.env.JUSTINSTACK_BOB_SKILLS_HOME) }
+    ...(context.env.JSTACK_BOB_SKILLS_HOME
+      ? { bob: path.resolve(context.cwd, context.env.JSTACK_BOB_SKILLS_HOME) }
       : {}),
-    ...(context.env.JUSTINSTACK_CODEX_SKILLS_HOME
-      ? { codex: path.resolve(context.cwd, context.env.JUSTINSTACK_CODEX_SKILLS_HOME) }
+    ...(context.env.JSTACK_CODEX_SKILLS_HOME
+      ? { codex: path.resolve(context.cwd, context.env.JSTACK_CODEX_SKILLS_HOME) }
       : {}),
   };
   return {
     packageRoot: context.packageRoot,
     userHome,
-    justinStackHome,
+    jstackHome,
     target,
     scope,
     projectRoot,
@@ -261,7 +261,7 @@ function statusExitCode(status: string): number {
 
 function usage(): string {
   return [
-    "justinstack <command>",
+    "jstack <command>",
     "",
     "Commands:",
     "  doctor --target <claude|bob|codex|all> --scope <project|global>",
@@ -913,8 +913,8 @@ async function runInstallerCommand(
   const installerOptions = await installerEnvironmentOptions(parsed, context);
   if (command === "install") {
     const confirmation = stringOption(parsed, "confirm-overwrite");
-    if (confirmation !== undefined && confirmation !== "JUSTINSTACK" && confirmation !== "STORY-STACK") {
-      throw new StoryStackError("Overwrite confirmation must be exactly JUSTINSTACK", "INVALID_ARGUMENTS");
+    if (confirmation !== undefined && confirmation !== "JSTACK" && confirmation !== "STORY-STACK") {
+      throw new StoryStackError("Overwrite confirmation must be exactly JSTACK", "INVALID_ARGUMENTS");
     }
     const plan = await planInstall(installerOptions);
     if (!apply) {
@@ -927,7 +927,7 @@ async function runInstallerCommand(
         ? JSON.stringify({ ok: plan.safetyIssues.length === 0, phase: "preflight", dryRun: false, plan })
         : formatInstallPlan(plan).replace("(dry-run; no files written)", "(preflight; writing follows)"),
     );
-    const result = await applyInstall(plan, { confirmOverwrite: confirmation === "JUSTINSTACK" || confirmation === "STORY-STACK" });
+    const result = await applyInstall(plan, { confirmOverwrite: confirmation === "JSTACK" || confirmation === "STORY-STACK" });
     emit(
       context.io,
       wantsJson,
@@ -961,7 +961,7 @@ async function runSafety(
   assertAllowedOptions(parsed, ["command", "explicitly-requested", "permanent-only"]);
   const action = parsed.positionals[1];
   if (parsed.positionals.length !== 2 || (action !== "check" && action !== "hook")) {
-    throw new StoryStackError("Use: justinstack safety check --command <command>, or safety hook", "INVALID_ARGUMENTS");
+    throw new StoryStackError("Use: jstack safety check --command <command>, or safety hook", "INVALID_ARGUMENTS");
   }
   let command = stringOption(parsed, "command");
   if (action === "hook") {

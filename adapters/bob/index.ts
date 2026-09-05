@@ -32,9 +32,9 @@ export const bobAdapter: PlatformAdapter = {
       proposal({
         id: "bob-rules",
         kind: "rules",
-        targetPath: path.join(root, "rules", "justinstack.md"),
-        summary: "Propose a Bob rule containing JustinStack's permanent local-only safety contract.",
-        snippet: `# JustinStack safety rule\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
+        targetPath: path.join(root, "rules", "jstack.md"),
+        summary: "Propose a Bob rule containing JStack's permanent local-only safety contract.",
+        snippet: `# JStack safety rule\n\n${PERMANENT_SAFETY_INSTRUCTIONS}`,
       }),
       proposal({
         id: "bob-lifecycle-hooks",
@@ -69,12 +69,12 @@ export const bobAdapter: PlatformAdapter = {
       {
         id: "bob-advanced-mode",
         level: "warning",
-        message: "IBM Bob skills require Advanced mode; enable it before trying JustinStack skills.",
+        message: "IBM Bob skills require Advanced mode; enable it before trying JStack skills.",
       },
       {
         id: "bob-list-skills",
         level: "info",
-        message: `In Bob IDE, invoke /justinstack-review or use the Skills UI. In Bob Shell, type $ and select justinstack-review so Bob inserts the $justinstack-review reference, or use /skills; verify discovery from ${bobSkillRoot(scope, paths)}.`,
+        message: `In Bob IDE, invoke /jstack-review or use the Skills UI. In Bob Shell, type $ and select jstack-review so Bob inserts the $jstack-review reference, or use /skills; verify discovery from ${bobSkillRoot(scope, paths)}.`,
       },
       {
         id: "bob-proposals-not-applied",

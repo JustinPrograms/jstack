@@ -55,13 +55,13 @@ import {
 } from "./types.js";
 
 export interface StoreOptions {
-  justinStackHome?: string;
-  /** @deprecated Use justinStackHome. */
+  jstackHome?: string;
+  /** @deprecated Use jstackHome. */
   storyStackHome?: string;
   workspacesRoot?: string;
   /** Legacy single-checkpoint root retained for explicit migration helpers. */
   stateRoot?: string;
-  /** Legacy root when it is independent from the new JustinStack home. */
+  /** Legacy root when it is independent from the new JStack home. */
   legacyStateRoot?: string;
   packageRoot?: string;
   clock?: () => Date;
@@ -148,15 +148,15 @@ function resolveSafeStateRoot(candidate: string, label: string): string {
   return resolved;
 }
 
-export function defaultJustinStackHome(environment: NodeJS.ProcessEnv = process.env): string {
-  const override = [environment.JUSTINSTACK_HOME, environment.JUSTIN_STACK_HOME, environment.STORY_STACK_HOME]
+export function defaultJStackHome(environment: NodeJS.ProcessEnv = process.env): string {
+  const override = [environment.JSTACK_HOME, environment.STORY_STACK_HOME]
     .find((candidate) => candidate !== undefined && candidate.length > 0);
-  const candidate = override && override.length > 0 ? override : path.join(os.homedir(), ".justin-stack");
-  return resolveSafeStateRoot(candidate, "JustinStack home");
+  const candidate = override && override.length > 0 ? override : path.join(os.homedir(), ".jstack");
+  return resolveSafeStateRoot(candidate, "JStack home");
 }
 
-/** @deprecated Use defaultJustinStackHome. */
-export const defaultStoryStackHome = defaultJustinStackHome;
+/** @deprecated Use defaultJStackHome. */
+export const defaultStoryStackHome = defaultJStackHome;
 
 export function defaultLegacyStateRoot(environment: NodeJS.ProcessEnv = process.env): string {
   const explicitLegacy = environment.STORY_STACK_HOME;
@@ -535,8 +535,8 @@ function assertStatusTransition(from: TicketStatus, to: TicketStatus): void {
 }
 
 export class CheckpointStore {
-  readonly justinStackHome: string;
-  /** @deprecated Use justinStackHome. */
+  readonly jstackHome: string;
+  /** @deprecated Use jstackHome. */
   readonly storyStackHome: string;
   readonly workspacesRoot: string;
   /** Legacy `.story-stack/state`-style root; used only by migration helpers. */
@@ -550,16 +550,16 @@ export class CheckpointStore {
       : options.workspacesRoot !== undefined
         ? path.dirname(path.resolve(options.workspacesRoot))
         : undefined;
-    this.justinStackHome = resolveSafeStateRoot(
-      options.justinStackHome ?? options.storyStackHome ?? inferredHome ?? defaultJustinStackHome(),
-      "JustinStack home",
+    this.jstackHome = resolveSafeStateRoot(
+      options.jstackHome ?? options.storyStackHome ?? inferredHome ?? defaultJStackHome(),
+      "JStack home",
     );
-    this.storyStackHome = this.justinStackHome;
+    this.storyStackHome = this.jstackHome;
     this.stateRoot = resolveSafeStateRoot(
       options.legacyStateRoot ??
       options.stateRoot ??
       // `storyStackHome` is the deprecated Phase 1 home override, so retain
-      // its old `state/` location. A new JustinStack/workspace override alone
+      // its old `state/` location. A new JStack/workspace override alone
       // must not redirect legacy discovery away from ~/.story-stack/state.
       (options.storyStackHome === undefined
         ? defaultLegacyStateRoot()

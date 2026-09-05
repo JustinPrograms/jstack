@@ -15,8 +15,8 @@ export type DoctorReminderLevel = "info" | "warning";
 export interface AdapterPaths {
   userHome: string;
   projectRoot: string;
-  /** Resolved shared runtime root; defaults to <userHome>/.justin-stack. */
-  justinStackHome?: string;
+  /** Resolved shared runtime root; defaults to <userHome>/.jstack. */
+  jstackHome?: string;
   /** Resolved Claude personal configuration root; defaults to <userHome>/.claude. */
   claudeConfigDir?: string;
   /** Resolved Codex configuration root; defaults to <userHome>/.codex. */
@@ -105,9 +105,9 @@ const SAFETY_HOOK_BOOTSTRAP =
 
 /** Portable command fragment for a proposal-only PreToolUse guard. */
 export function localSafetyHookCommand(paths: AdapterPaths): string {
-  const runtimeRoot = paths.justinStackHome === undefined
-    ? path.join(resolveContextBase("global", paths), ".justin-stack")
-    : path.resolve(paths.justinStackHome);
+  const runtimeRoot = paths.jstackHome === undefined
+    ? path.join(resolveContextBase("global", paths), ".jstack")
+    : path.resolve(paths.jstackHome);
   const runtimeCli = path.join(
     runtimeRoot,
     "runtime",
