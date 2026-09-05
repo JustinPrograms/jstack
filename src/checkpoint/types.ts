@@ -69,6 +69,8 @@ export interface ContinuityBundlePaths {
   progress: string;
   checks: string;
   handoff: string;
+  /** Engine-owned advisory routing record; absent until explicitly initialized. */
+  routing: string;
   state: string;
 }
 

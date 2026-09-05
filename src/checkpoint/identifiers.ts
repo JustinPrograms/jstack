@@ -96,6 +96,7 @@ export function checkpointBundlePaths(
     progress: resolveContained(directory, "progress.md"),
     checks: resolveContained(directory, "checks.md"),
     handoff: resolveContained(directory, "handoff.md"),
+    routing: resolveContained(directory, "routing.json"),
     state: resolveContained(directory, "state.json"),
   };
 }

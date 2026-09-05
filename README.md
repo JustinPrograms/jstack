@@ -97,6 +97,48 @@ justinstack state complete --workspace sample-app --story DEMO-101 --repo .
 
 Agents supply concise Markdown through `state update`; they do not edit the bundle directly. Changing `Required user approvals` requires `--allow-approval-change`. Marking validation current requires a successful check summary tied to the current fingerprint.
 
+### Advisory routing
+
+Routing is local advice and continuity state, not a provider control plane. It
+never starts a worker, enforces a real host-agent cap, selects a provider model,
+or reads billing information. It classifies work as `light`, `medium`, or
+`heavy`, records a declared per-story slot decision, and leaves the actual host
+choice with the user.
+
+Initialize routing once for an existing story, then use structured JSON input.
+This file-based flow is safe to copy from PowerShell or `cmd`, including on paths
+with spaces:
+
+```text
+justinstack state upgrade-routing --workspace sample-app --story DEMO-101 --repo .
+justinstack state routing assess --workspace sample-app --story DEMO-101 --repo . --input-file routing-task.json --json
+justinstack state routing declare --workspace sample-app --story DEMO-101 --repo . --input-file routing-task.json --json
+justinstack state routing inspect --workspace sample-app --story DEMO-101 --repo . --json
+```
+
+`routing-task.json` contains only a short task boundary and local scopes:
+
+```json
+{
+  "id": "routing-1",
+  "work_class": "medium",
+  "rationale": "A bounded implementation needs one focused recommendation.",
+  "read_scopes": ["src"],
+  "write_scopes": ["src/routing.ts"],
+  "host": null,
+  "model": null,
+  "low_usage_attestation": null
+}
+```
+
+Valid advisory results are `recommended`, `manual-choice-required`,
+`requires-user-approval`, `policy-exception`, and `do-not-delegate`; they exit
+successfully because the record is valid. Malformed input, unsafe scopes, stale
+identity, and invalid lifecycle changes are structured nonzero errors. Use
+`record-attempt`, `complete`, `abandon`, and `reconcile-resume` to maintain the
+record. `recovery` is read-only and reports the saved routing state; it never
+assumes that a manually started worker is still active.
+
 ## Installation
 
 Installation is always a dry run unless `--apply` is explicit. Project scope uses the current project root; global scope uses the user's home directory.

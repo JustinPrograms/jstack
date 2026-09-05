@@ -67,6 +67,7 @@ The bundle contains these maintained files:
 - `progress.md`: an engine-owned projection of the approved plan, completed and current work, and inspected or changed files.
 - `checks.md`: an engine-owned projection of validation results and addressed or pending review feedback.
 - `handoff.md`: an engine-owned recovery view containing objective, progress, next action, blockers, approvals, and validation.
+- `routing.json`: an optional engine-owned advisory routing record. It is created only by `state upgrade-routing` and changed only by the coordinator through `state routing` commands.
 - `state.json`: engine-owned schema, identity, repository snapshot, status, timestamps, and hashes for the five Markdown files.
 
 `context.md` remains the canonical human-readable current snapshot. The other files are deterministic recovery projections. `state.json` is machine-owned. Do not hand-edit any bundle file; use the CLI so validation, locking, privacy checks, and atomic writes remain in force.
@@ -107,6 +108,12 @@ Safe reconciliation may update only facts verifiable from local evidence. Produc
 
 Only the coordinating agent may update the canonical bundle. Delegated workers return observations to the coordinator and must not call state-changing commands or edit bundle files.
 
+Routing remains advisory. A declared slot, work class, host, or model in
+`routing.json` is not proof that a worker was started, a host observed it, a
+model changed, or a provider cost was incurred. Record only short local scope,
+reason, and outcome summaries; never save raw prompts, source bodies, URLs,
+credentials, provider account data, or billing data in routing evidence.
+
 Use the CLI for every write:
 
 - `state init` creates a missing bundle and preserves an existing one.
@@ -114,6 +121,8 @@ Use the CLI for every write:
 - `state approve-plan` records a complete, explicitly approved plan and performs the eligible status transition.
 - `state snapshot` refreshes only locally derived repository metadata.
 - `state complete` records completion only after its gates pass.
+- `state upgrade-routing` creates the optional empty advisory record for an existing story.
+- `state routing` assesses or records declared work, attempts, terminal outcomes, and explicit resume reconciliation without controlling any host.
 
 Update after meaningful progress: a plan or decision changes; repository discovery changes scope; code or tests change; a check completes; review feedback changes; a blocker or approval changes; or a long-running action is about to begin and saving the exact recovery point reduces risk.
 

@@ -25,10 +25,11 @@ async function walk(directory: string): Promise<string[]> {
 }
 
 function frontmatter(source: string): { name: string; description: string; body: string } {
-  assert.equal(source.startsWith("---\n"), true);
-  const end = source.indexOf("\n---\n", 4);
+  const normalized = source.replace(/\r\n?/gu, "\n");
+  assert.equal(normalized.startsWith("---\n"), true);
+  const end = normalized.indexOf("\n---\n", 4);
   assert.notEqual(end, -1);
-  const lines = source.slice(4, end).split("\n");
+  const lines = normalized.slice(4, end).split("\n");
   assert.equal(lines.length, 2);
   assert.deepEqual(
     lines.map((line) => line.slice(0, line.indexOf(":"))).sort(),
@@ -38,7 +39,7 @@ function frontmatter(source: string): { name: string; description: string; body:
   return {
     name: values.get("name") ?? "",
     description: values.get("description") ?? "",
-    body: source.slice(end + 5),
+    body: normalized.slice(end + 5),
   };
 }
 
