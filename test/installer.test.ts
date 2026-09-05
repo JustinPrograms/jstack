@@ -38,6 +38,10 @@ test("installer planning is a true dry run and lists every target", async (t) =>
     plan.entries.some((entry) => entry.targetPath === path.join(options.claudeSkillsRoot, "plan-eng-review", "SKILL.md")),
     true,
   );
+  assert.equal(
+    plan.entries.some((entry) => entry.targetPath === path.join(options.claudeSkillsRoot, "implement-story", "SKILL.md")),
+    true,
+  );
   await assert.rejects(readFile(plan.manifestPath, "utf8"), /ENOENT/u);
   for (const entry of plan.entries) await assert.rejects(readFile(entry.targetPath), /ENOENT/u);
 });
