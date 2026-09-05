@@ -57,6 +57,32 @@ export async function assertSafeWritePath(root: string, target: string): Promise
   }
 }
 
+/**
+ * Refuse state roots that resolve to the repository itself or anywhere below
+ * it. Otherwise, writing a checkpoint changes the worktree it is describing
+ * and can make every snapshot stale immediately.
+ */
+export async function assertStateRootOutsideRepository(stateRoot: string, repositoryRoot: string): Promise<void> {
+  const canonicalRepository = await canonicalizeProspectivePath(repositoryRoot);
+  const canonicalStateRoot = await canonicalizeProspectivePath(stateRoot);
+  const relative = path.relative(canonicalRepository, canonicalStateRoot);
+  if (relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`))) {
+    throw new StoryStackError(
+      "Checkpoint state root must be outside the active repository",
+      "STATE_ROOT_INSIDE_REPOSITORY",
+      4,
+    );
+  }
+}
+
+async function canonicalizeProspectivePath(target: string): Promise<string> {
+  const resolved = path.resolve(target);
+  const existing = await findExistingParent(resolved);
+  const canonicalExisting = await realpath(existing);
+  const remainder = path.relative(existing, resolved);
+  return path.resolve(canonicalExisting, remainder);
+}
+
 async function findExistingParent(start: string): Promise<string> {
   let cursor = start;
   for (;;) {

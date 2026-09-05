@@ -1,13 +1,13 @@
 ---
 name: resume-story
-description: Recover interrupted JustinStack story work from shared local state, validate it against current Git state, and continue from the exact next action. Use after compaction, usage limits, or a new agent session.
+description: Recover the latest successfully persisted JustinStack story state, validate it against current Git state, and continue from its saved next action. Use after compaction, usage limits, or a new agent session.
 ---
 
 # Resume Story
 
-Recover the active story without replaying completed discovery. Saved state is a lead, not ground truth: compare it with the current local repository, preserve every unresolved approval gate, and obey the shared execution boundary.
+Recover the active story from its latest successfully persisted checkpoint without replaying completed discovery. Saved state is a lead, not ground truth: compare it with the current local repository, preserve every unresolved approval gate, and obey the shared execution boundary.
 
-Before acting, read the shared checkpoint and safety protocol. In an installation it is at `~/.justin-stack/policies/checkpoint-protocol.md`; in this source project it is at `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither copy is available.
+Before acting, resolve the JustinStack runtime home from the first non-empty value of `JUSTINSTACK_HOME`, `JUSTIN_STACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.justin-stack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/justinstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `justinstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available.
 
 ## Find and validate the story
 
@@ -28,7 +28,9 @@ Before acting, read the shared checkpoint and safety protocol. In an installatio
 
 Use `justinstack state update` when semantic state changes and `state snapshot` when only Git-derived metadata changes. Have only the coordinating agent write, use a complete temporary body, preserve status and approval gates, and remove the temporary file after success or failure. Do not edit `context.md`, projections, or `state.json` directly.
 
-Avoid writing when validation is current and semantic state is accurate. Validate again after any update.
+Avoid writing when validation is current and semantic state is accurate. Validate again after any update. Capture the current fingerprint before running a check through the host, then use `state record-validation --expected-fingerprint <sha256> --confirm-validation-succeeded` to bind the coordinator's observed-success attestation. JustinStack does not execute the check; do not infer freshness from user-authored PASS text.
+
+An abrupt usage-limit cutoff cannot run a final save hook reliably. Only a bundle whose last-written integrity manifest validates is guaranteed to survive; reasoning or progress since that write may be absent. Treat recovery after such a cutoff as best effort, show the checkpoint timestamp and Git drift, and never claim that unsaved work was captured.
 
 ## Display the recovery summary
 
@@ -46,9 +48,9 @@ Derive the summary from the validated six-file bundle and current repository. In
 
 Keep the summary concise enough to act on immediately. Never paste source bodies, full diffs, ticket prose, internal links, names, or verbatim review comments into state or the report.
 
-## Continue at the exact next action
+## Continue from the persisted next action
 
-Continue only when validation and the active workflow make the saved next action safe:
+Continue only when validation and the active workflow make the saved next action safe. It is exact as of the checkpoint timestamp, not necessarily the moment the prior session ended:
 
 - do not repeat completed discovery merely to rebuild context;
 - inspect only the files needed for the next action;

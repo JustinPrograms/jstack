@@ -15,6 +15,9 @@ import {
 import { REQUIRED_SECTIONS } from "./checkpoint/schema.js";
 import { packageRootFromModule } from "./checkpoint/template.js";
 import { serializeCheckpoint } from "./checkpoint/frontmatter.js";
+import { findRepositoryRoot } from "./checkpoint/git.js";
+import { repositoryIdentity } from "./checkpoint/identifiers.js";
+import type { GitSnapshot, ReconciliationResult } from "./checkpoint/types.js";
 import { StoryStackError, errorMessage } from "./errors.js";
 import {
   assessRoutingTask,
@@ -23,7 +26,6 @@ import {
   validateRoutingTask,
   type RoutingEvidence,
   type RoutingTask,
-  type WorkClass,
 } from "./routing.js";
 import {
   applyInstall,
@@ -42,9 +44,9 @@ const BOOLEAN_OPTIONS = new Set([
   "json",
   "dry-run",
   "apply",
-  "mark-validated",
   "allow-approval-change",
   "confirm-user-approved",
+  "confirm-validation-succeeded",
   "explicitly-requested",
   "permanent-only",
   "help",
@@ -53,6 +55,7 @@ const BOOLEAN_OPTIONS = new Set([
 interface ParsedArguments {
   positionals: string[];
   options: Map<string, string | true>;
+  passthrough: string[];
 }
 
 export interface CliIo {
@@ -75,9 +78,14 @@ const defaultIo: CliIo = {
 function parseArguments(argv: readonly string[]): ParsedArguments {
   const positionals: string[] = [];
   const options = new Map<string, string | true>();
+  const passthrough: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === undefined) continue;
+    if (argument === "--") {
+      passthrough.push(...argv.slice(index + 1));
+      break;
+    }
     if (!argument.startsWith("--")) {
       positionals.push(argument);
       continue;
@@ -105,7 +113,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
       index += 1;
     }
   }
-  return { positionals, options };
+  return { positionals, options, passthrough };
 }
 
 function assertAllowedOptions(parsed: ParsedArguments, allowed: readonly string[]): void {
@@ -126,6 +134,27 @@ function flag(parsed: ParsedArguments, key: string): boolean {
 
 function emit(io: CliIo, json: boolean, value: unknown, human: string): void {
   io.stdout(json ? JSON.stringify(value, null, 2) : human);
+}
+
+function publicGitSnapshot(snapshot: GitSnapshot | null): Omit<GitSnapshot, "repositoryRoot" | "changedFiles" | "untrackedFiles"> & {
+  repositoryId: string;
+} | null {
+  if (snapshot === null) return null;
+  return {
+    repositoryId: repositoryIdentity(snapshot.repositoryRoot),
+    currentBranch: snapshot.currentBranch,
+    headCommit: snapshot.headCommit,
+    dirty: snapshot.dirty,
+    changedFileCount: snapshot.changedFileCount,
+    untrackedFileCount: snapshot.untrackedFileCount,
+    worktreeFingerprint: snapshot.worktreeFingerprint,
+  };
+}
+
+function publicReconciliation(result: ReconciliationResult): Omit<ReconciliationResult, "currentSnapshot"> & {
+  currentSnapshot: ReturnType<typeof publicGitSnapshot>;
+} {
+  return { ...result, currentSnapshot: publicGitSnapshot(result.currentSnapshot) };
 }
 
 function safeDisplay(value: string): string {
@@ -152,32 +181,74 @@ function targetAndScope(parsed: ParsedArguments): { target: TargetSelection; sco
   }
 }
 
-function installerEnvironmentOptions(
+async function implicitProjectRoot(scope: InstallScope, cwd: string): Promise<string> {
+  const resolvedCwd = path.resolve(cwd);
+  if (scope !== "project") return resolvedCwd;
+  try {
+    return await findRepositoryRoot(resolvedCwd);
+  } catch (error) {
+    if (
+      error instanceof StoryStackError &&
+      (error.code === "NOT_A_REPOSITORY" ||
+        (error.code === "GIT_FAILED" && /not a git repository/iu.test(error.message)))
+    ) {
+      return resolvedCwd;
+    }
+    throw error;
+  }
+}
+
+async function installerEnvironmentOptions(
   parsed: ParsedArguments,
   context: Required<Pick<CliContext, "cwd" | "env" | "packageRoot">>,
-) {
+): Promise<{
+  packageRoot: string;
+  userHome: string;
+  justinStackHome: string;
+  target: TargetSelection;
+  scope: InstallScope;
+  projectRoot: string;
+  skillRoots: Partial<Record<"claude" | "bob" | "codex", string>>;
+  claudeConfigDir?: string;
+  codexHome?: string;
+}> {
   const { target, scope } = targetAndScope(parsed);
+  const userHome = path.resolve(context.cwd, context.env.JUSTINSTACK_USER_HOME ?? os.homedir());
   const justinStackHome = defaultStoryStackHome(context.env);
-  const projectRoot = path.resolve(stringOption(parsed, "project-root") ?? context.cwd);
+  const explicitProjectRoot = stringOption(parsed, "project-root");
+  const projectRoot = explicitProjectRoot === undefined
+    ? await implicitProjectRoot(scope, context.cwd)
+    : path.resolve(context.cwd, explicitProjectRoot);
+  const claudeConfigDir = context.env.CLAUDE_CONFIG_DIR
+    ? path.resolve(context.cwd, context.env.CLAUDE_CONFIG_DIR)
+    : undefined;
+  const codexHome = context.env.CODEX_HOME
+    ? path.resolve(context.cwd, context.env.CODEX_HOME)
+    : undefined;
+  const explicitClaudeSkills = context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME ?? context.env.STORY_STACK_SKILLS_HOME;
   const skillRoots = {
-    ...(context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME || context.env.STORY_STACK_SKILLS_HOME
-      ? { claude: path.resolve(context.env.JUSTINSTACK_CLAUDE_SKILLS_HOME ?? context.env.STORY_STACK_SKILLS_HOME ?? "") }
+    ...(explicitClaudeSkills
+      ? { claude: path.resolve(context.cwd, explicitClaudeSkills) }
+      : scope === "global" && claudeConfigDir !== undefined
+        ? { claude: path.join(claudeConfigDir, "skills") }
       : {}),
     ...(context.env.JUSTINSTACK_BOB_SKILLS_HOME
-      ? { bob: path.resolve(context.env.JUSTINSTACK_BOB_SKILLS_HOME) }
+      ? { bob: path.resolve(context.cwd, context.env.JUSTINSTACK_BOB_SKILLS_HOME) }
       : {}),
     ...(context.env.JUSTINSTACK_CODEX_SKILLS_HOME
-      ? { codex: path.resolve(context.env.JUSTINSTACK_CODEX_SKILLS_HOME) }
+      ? { codex: path.resolve(context.cwd, context.env.JUSTINSTACK_CODEX_SKILLS_HOME) }
       : {}),
   };
   return {
     packageRoot: context.packageRoot,
-    userHome: path.resolve(context.env.JUSTINSTACK_USER_HOME ?? os.homedir()),
+    userHome,
     justinStackHome,
     target,
     scope,
     projectRoot,
     skillRoots,
+    ...(claudeConfigDir === undefined ? {} : { claudeConfigDir }),
+    ...(codexHome === undefined ? {} : { codexHome }),
   };
 }
 
@@ -198,6 +269,7 @@ function usage(): string {
     "  state path|show|validate|snapshot|bundle-status|repair|recovery|complete|upgrade-routing [--workspace <slug> --story <KEY>] [--repo <path>]",
     "  state migrate --workspace <slug> --story <KEY>",
     "  state update [identity] [--repo <path>] --body-file <path> [--section <heading>] [--status <status>]",
+    "  state record-validation [identity] [--repo <path>] --body-file <summary-path> --expected-fingerprint <sha256> --confirm-validation-succeeded",
     "  state approve-plan [identity] [--repo <path>] --body-file <path> --confirm-user-approved",
     "  state list [--repo <path>]",
     "  state routing assess|declare --input-file <path> [--workspace <slug> --story <KEY>] [--repo <path>]",
@@ -245,7 +317,12 @@ async function findCheckpointLocks(storyHome: string): Promise<string[]> {
     for (const entry of entries) {
       const entryPath = path.join(directory, entry.name);
       if (entry.isDirectory()) await visit(entryPath, depth + 1);
-      else if (entry.isFile() && /^\.[A-Z][A-Z0-9-]+\.lock$/u.test(entry.name)) locks.push(entryPath);
+      else if (
+        entry.isFile() &&
+        /^\.[A-Z][A-Z0-9-]+\.lock(?:$|\.(?:choosing|ticket)\.)/u.test(entry.name)
+      ) {
+        locks.push(entryPath);
+      }
     }
   }
   try {
@@ -280,7 +357,7 @@ async function runDoctor(
     templateAvailable = false;
   }
   const checkpointLocks = await findCheckpointLocks(storyHome);
-  const platforms = await inspectPlatformInstallations(installerEnvironmentOptions(parsed, context));
+  const platforms = await inspectPlatformInstallations(await installerEnvironmentOptions(parsed, context));
   const checks = {
     node: { ok: major >= 20, version: process.versions.node, required: ">=20" },
     git: { ok: gitVersion !== null, version: gitVersion },
@@ -406,8 +483,7 @@ async function runRouting(
   if (action === undefined || !["assess", "declare", "record-attempt", "complete", "abandon", "inspect", "reconcile-resume"].includes(action)) {
     throw new StoryStackError("Use a supported state routing action", "INVALID_ARGUMENTS");
   }
-  const options = ["workspace", "story", "project", "ticket", "repo", "input-file", "task"];
-  assertAllowedOptions(parsed, options);
+  assertAllowedOptions(parsed, ["workspace", "story", "project", "ticket", "repo", "input-file", "task"]);
   const identity = await resolveIdentity(store, parsed, repositoryPath);
   const inputFile = stringOption(parsed, "input-file");
   if (["assess", "declare", "record-attempt"].includes(action) && !inputFile) {
@@ -428,7 +504,15 @@ async function runRouting(
       return 0;
     }
     const now = new Date().toISOString();
-    const task = validateRoutingTask({ ...input, status: "declared", ...assessment, policy_digest: digestRoutingPolicy(policy), evidence: [], created_at: now, updated_at: now });
+    const task = validateRoutingTask({
+      ...input,
+      status: "declared",
+      ...assessment,
+      policy_digest: digestRoutingPolicy(policy),
+      evidence: [],
+      created_at: now,
+      updated_at: now,
+    });
     const result = await store.declareRoutingTask(identity, repositoryPath, task);
     emit(context.io, wantsJson, { ok: true, changed: result.changed, task: result.task, result: result.task.result }, `${result.task.result}: routing task ${result.task.id} declared`);
     return 0;
@@ -466,7 +550,7 @@ async function runState(
   if ((action === "routing" && parsed.positionals.length !== 3) || (action !== "routing" && parsed.positionals.length > 2)) {
     throw new StoryStackError("Too many positional arguments", "INVALID_ARGUMENTS");
   }
-  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "bundle-status", "repair", "migrate", "upgrade-routing", "routing", "update", "approve-plan", "complete", "recovery"]);
+  const knownActions = new Set(["init", "list", "path", "show", "validate", "snapshot", "bundle-status", "repair", "migrate", "upgrade-routing", "routing", "update", "record-validation", "approve-plan", "complete", "recovery"]);
   if (!knownActions.has(action)) throw new StoryStackError(`Unknown state command '${action}'`, "INVALID_ARGUMENTS");
   const store = new CheckpointStore({
     storyStackHome: defaultStoryStackHome(context.env),
@@ -501,7 +585,7 @@ async function runState(
         created: result.changed,
         path: result.checkpointPath,
         metadata: result.checkpoint.metadata,
-        ...(existingValidation === null ? {} : { reconciliation: existingValidation }),
+        ...(existingValidation === null ? {} : { reconciliation: publicReconciliation(existingValidation) }),
       },
       `${result.changed ? "Created" : `Preserved existing (${existingValidation?.status ?? "unknown"})`} checkpoint: ${result.checkpointPath}`,
     );
@@ -524,7 +608,7 @@ async function runState(
         ? {
             project: item.metadata.project_slug,
             ticket: item.metadata.ticket_key,
-            repository: item.metadata.repository_path,
+            repositoryId: item.metadata.repository_id,
             branch: item.metadata.current_branch,
             status: item.metadata.ticket_status,
             updatedAt: item.metadata.updated_at,
@@ -548,7 +632,7 @@ async function runState(
     path: ["workspace", "story", "project", "ticket", "repo"],
     show: ["workspace", "story", "project", "ticket", "repo"],
     validate: ["workspace", "story", "project", "ticket", "repo"],
-    snapshot: ["workspace", "story", "project", "ticket", "repo", "mark-validated"],
+    snapshot: ["workspace", "story", "project", "ticket", "repo"],
     "bundle-status": ["workspace", "story", "project", "ticket", "repo"],
     repair: ["workspace", "story", "project", "ticket", "repo"],
     migrate: ["workspace", "story", "project", "ticket", "repo"],
@@ -562,8 +646,17 @@ async function runState(
       "body-file",
       "section",
       "status",
-      "mark-validated",
       "allow-approval-change",
+    ],
+    "record-validation": [
+      "project",
+      "ticket",
+      "workspace",
+      "story",
+      "repo",
+      "body-file",
+      "expected-fingerprint",
+      "confirm-validation-succeeded",
     ],
     "approve-plan": ["workspace", "story", "project", "ticket", "repo", "body-file", "confirm-user-approved"],
     complete: ["workspace", "story", "project", "ticket", "repo"],
@@ -632,7 +725,7 @@ async function runState(
       `Validation freshness: ${result.validationIsCurrent ? "current" : "historical or not recorded"}`,
       ...result.reasons.map((reason) => `- ${safeDisplay(reason)}`),
     ].join("\n");
-    emit(context.io, wantsJson, { ok: result.status === "current", ...result }, human);
+    emit(context.io, wantsJson, { ok: result.status === "current", ...publicReconciliation(result) }, human);
     return statusExitCode(result.status);
   }
   if (action === "bundle-status") {
@@ -659,7 +752,7 @@ async function runState(
     return 0;
   }
   if (action === "migrate") {
-    const result = await store.migrateLegacy(identity);
+    const result = await store.migrateLegacy(identity, repositoryPath);
     emit(
       context.io,
       wantsJson,
@@ -669,7 +762,7 @@ async function runState(
     return 0;
   }
   if (action === "snapshot") {
-    const result = await store.snapshot(identity, repositoryPath, { markValidated: flag(parsed, "mark-validated") });
+    const result = await store.snapshot(identity, repositoryPath);
     emit(
       context.io,
       wantsJson,
@@ -698,7 +791,6 @@ async function runState(
       body,
       ...(section === undefined ? {} : { section }),
       ...(status === undefined ? {} : { status }),
-      markValidated: flag(parsed, "mark-validated"),
       allowApprovalChange: flag(parsed, "allow-approval-change"),
     });
     emit(
@@ -706,6 +798,38 @@ async function runState(
       wantsJson,
       { ok: true, changed: result.changed, path: result.checkpointPath, metadata: result.checkpoint.metadata },
       `${result.changed ? "Updated" : "No meaningful change to"} checkpoint: ${result.checkpointPath}`,
+    );
+    return 0;
+  }
+  if (action === "record-validation") {
+    const bodyFile = stringOption(parsed, "body-file");
+    if (!bodyFile) throw new StoryStackError("state record-validation requires --body-file", "INVALID_ARGUMENTS");
+    const expectedWorktreeFingerprint = stringOption(parsed, "expected-fingerprint");
+    if (!expectedWorktreeFingerprint) {
+      throw new StoryStackError(
+        "state record-validation requires --expected-fingerprint captured before the external check",
+        "INVALID_ARGUMENTS",
+      );
+    }
+    if (!flag(parsed, "confirm-validation-succeeded")) {
+      throw new StoryStackError(
+        "state record-validation requires --confirm-validation-succeeded after observing a zero-exit external check",
+        "INVALID_ARGUMENTS",
+      );
+    }
+    const summary = await readFile(path.resolve(bodyFile), "utf8");
+    const result = await store.recordValidation({
+      ...identity,
+      repositoryPath,
+      summary,
+      expectedWorktreeFingerprint,
+      confirmedSuccessful: true,
+    });
+    emit(
+      context.io,
+      wantsJson,
+      { ok: true, changed: result.changed, path: result.checkpointPath, metadata: result.checkpoint.metadata },
+      `Recorded successful validation: ${result.checkpointPath}`,
     );
     return 0;
   }
@@ -755,10 +879,18 @@ async function runState(
       `Next action: ${summary.exactRecommendedNextStep}`,
       `Blockers: ${summary.blockers}`,
       `Required approval: ${summary.requiredApproval}`,
-      `Routing: ${summary.routing}`,
       `Last successful validation: ${summary.lastSuccessfulValidation}`,
     ].join("\n");
-    emit(context.io, wantsJson, { ok: summary.reconciliation.status === "current", ...summary }, human);
+    emit(
+      context.io,
+      wantsJson,
+      {
+        ok: summary.reconciliation.status === "current",
+        ...summary,
+        reconciliation: publicReconciliation(summary.reconciliation),
+      },
+      human,
+    );
     return statusExitCode(summary.reconciliation.status);
   }
   throw new StoryStackError(`Unknown state command '${action}'`, "INVALID_ARGUMENTS");
@@ -778,7 +910,7 @@ async function runInstallerCommand(
   }
   const apply = flag(parsed, "apply");
   const wantsJson = flag(parsed, "json");
-  const installerOptions = installerEnvironmentOptions(parsed, context);
+  const installerOptions = await installerEnvironmentOptions(parsed, context);
   if (command === "install") {
     const confirmation = stringOption(parsed, "confirm-overwrite");
     if (confirmation !== undefined && confirmation !== "JUSTINSTACK" && confirmation !== "STORY-STACK") {
@@ -843,7 +975,12 @@ async function runSafety(
       chunks.push(buffer);
     }
     command = hookCommandFromPayload(Buffer.concat(chunks).toString("utf8")) ?? undefined;
-    if (command === undefined) return 0;
+    if (command === undefined) {
+      context.io.stderr(
+        "REFUSE [invalid-hook-payload]: A matched shell hook did not provide a non-empty command; refusing closed.",
+      );
+      return 2;
+    }
   }
   if (!command) throw new StoryStackError("safety check requires --command", "INVALID_ARGUMENTS");
   const decision = classifyCommand(command);
@@ -876,6 +1013,9 @@ export async function main(argv: readonly string[] = process.argv.slice(2), supp
       context.io.stdout(usage());
       return command ? 0 : 1;
     }
+    if (parsed.passthrough.length > 0) {
+      throw new StoryStackError("Unexpected arguments after '--'", "INVALID_ARGUMENTS");
+    }
     if (command === "doctor") return await runDoctor(parsed, context);
     if (command === "state") return await runState(parsed, context);
     if (command === "install" || command === "uninstall") return await runInstallerCommand(command, parsed, context);
@@ -889,7 +1029,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2), supp
         ? JSON.stringify({ ok: false, error: { code: storyError.code, message: storyError.message } }, null, 2)
         : `Error [${storyError.code}]: ${storyError.message}`,
     );
-    return storyError.exitCode;
+    // Claude Code and IBM Bob interpret exit 2 as a blocking hook decision.
+    // Once invoked in hook mode, malformed options, oversized input, read
+    // failures, and unexpected errors must all fail closed with that code.
+    return argv[0] === "safety" && argv[1] === "hook" ? 2 : storyError.exitCode;
   }
 }
 

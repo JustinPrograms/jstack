@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { cp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmod, cp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import {
+  INSTALL_TRANSACTION_FILENAME,
   INSTALLED_SKILLS,
   applyInstall,
   applyUninstall,
@@ -18,10 +22,11 @@ import type { InstallScope, PlatformTarget, TargetSelection } from "../adapters/
 import { temporaryDirectory } from "./helpers/git-fixture.js";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const execFileAsync = promisify(execFile);
 const PLATFORM_MARKERS: Readonly<Record<PlatformTarget, string>> = {
   claude: ".claude",
   bob: ".bob",
-  codex: ".codex",
+  codex: ".agents",
 };
 
 interface InstallFixture {
@@ -299,7 +304,7 @@ test("sequential global target installs preserve earlier manifest records and fi
   await assertCanonicalSkillsAreByteIdentical(fixture, "global");
 });
 
-test("unmanaged skill collision includes a diff and refuses before partial writes", async (t) => {
+test("unmanaged skill collision reports only hashes and metadata and refuses before partial writes", async (t) => {
   const fixture = await installFixture(t, "justinstack-collision-diff-");
   const collisionPath = path.join(fixture.userHome, ".bob", "skills", "story", "SKILL.md");
   await mkdir(path.dirname(collisionPath), { recursive: true });
@@ -312,8 +317,12 @@ test("unmanaged skill collision includes a diff and refuses before partial write
   assert.equal(collisionEntry?.collision?.kind, "file");
   assert.match(collisionEntry?.diff ?? "", /--- .+SKILL\.md/u);
   assert.match(collisionEntry?.diff ?? "", /\+\+\+ .+SKILL\.md \(proposed\)/u);
-  assert.match(collisionEntry?.diff ?? "", /-user-owned sentinel/u);
-  assert.match(formatInstallPlan(plan), /Unmanaged existing files require --confirm-overwrite JUSTINSTACK/u);
+  assert.match(collisionEntry?.diff ?? "", /content-metadata-only/u);
+  assert.match(collisionEntry?.diff ?? "", /sha256:/u);
+  assert.doesNotMatch(collisionEntry?.diff ?? "", /user-owned sentinel/u);
+  const formatted = formatInstallPlan(plan);
+  assert.match(formatted, /Unmanaged existing files require --confirm-overwrite JUSTINSTACK/u);
+  assert.doesNotMatch(formatted, /user-owned sentinel/u);
 
   await assert.rejects(applyInstall(plan), /explicit overwrite confirmation/u);
   assert.equal(await readFile(collisionPath, "utf8"), "user-owned sentinel\n");
@@ -404,6 +413,27 @@ test("uninstall uses the recorded custom root and never guesses the current defa
   assert.equal(await exists(customSkill), false);
   assert.deepEqual(await readFile(defaultSentinel), sentinelBytes);
   assert.equal(await exists(install.manifestPath), false);
+});
+
+test("Claude installs outside user home through CLAUDE_CONFIG_DIR can be uninstalled", async (t) => {
+  const fixture = await installFixture(t, "justinstack-external-claude-config-");
+  const claudeConfigDir = path.join(fixture.root, "External Claude Config");
+  const installOptions: InstallerOptions = {
+    ...options(fixture, "claude", "global"),
+    claudeConfigDir,
+  };
+  const installed = await applyInstall(installOptions);
+  const installedSkill = path.join(claudeConfigDir, "skills", "story", "SKILL.md");
+  assert.equal(await exists(installedSkill), true);
+
+  const uninstallPlan = await planUninstall(installOptions);
+  assert.equal(uninstallPlan.blocked.length, 0);
+  assert.equal(uninstallPlan.entries.some((entry) => entry.targetPath === installedSkill && entry.status === "remove"), true);
+
+  const result = await applyUninstall(uninstallPlan);
+  assert.equal(result.blocked.length, 0);
+  assert.equal(await exists(installedSkill), false);
+  assert.equal(await exists(installed.manifestPath), false);
 });
 
 test("a removed canonical file is planned and removed when its installed hash still matches", async (t) => {
@@ -532,7 +562,7 @@ test("concurrent different-target uninstalls serialize manifest updates without 
   assert.deepEqual(manifest.installations.map((entry) => entry.key), ["global:codex"]);
   assert.equal(await exists(path.join(fixture.userHome, ".claude", "skills", "story", "SKILL.md")), false);
   assert.equal(await exists(path.join(fixture.userHome, ".bob", "skills", "story", "SKILL.md")), false);
-  assert.equal(await exists(path.join(fixture.userHome, ".codex", "skills", "story", "SKILL.md")), true);
+  assert.equal(await exists(path.join(fixture.userHome, ".agents", "skills", "story", "SKILL.md")), true);
   assert.equal(await exists(path.join(fixture.justinStackHome, "bin", "justinstack.js")), true);
 });
 
@@ -540,7 +570,7 @@ test("collision diffs are bounded and terminal control characters are escaped", 
   const fixture = await installFixture(t, "justinstack-safe-diff-");
   const skillsRoot = path.join(fixture.userHome, ".bob", "skills");
   const largePath = path.join(skillsRoot, "story", "SKILL.md");
-  const controlledPath = path.join(skillsRoot, "review", "SKILL.md");
+  const controlledPath = path.join(skillsRoot, "justinstack-review", "SKILL.md");
   const largeBytes = Buffer.concat([
     Buffer.from("large collision with terminal control: \u001b[31m", "utf8"),
     Buffer.alloc(64 * 1024, 0x41),
@@ -554,14 +584,411 @@ test("collision diffs are bounded and terminal control characters are escaped", 
   const plan = await planInstall(options(fixture, "bob", "global"));
   const largeDiff = plan.entries.find((entry) => entry.targetPath === largePath)?.diff ?? "";
   const controlledDiff = plan.entries.find((entry) => entry.targetPath === controlledPath)?.diff ?? "";
-  assert.match(largeDiff, /binary-or-large-file/u);
+  assert.match(largeDiff, /content-metadata-only/u);
   assert.equal(Buffer.byteLength(largeDiff, "utf8") < 1024, true);
-  assert.match(controlledDiff, /\\u001b/u);
-  assert.match(controlledDiff, /\\u0007/u);
+  assert.doesNotMatch(controlledDiff, /\\u001b|\\u0007/u);
+  assert.doesNotMatch(controlledDiff, /visible|example\.invalid|link/u);
   const terminalControls = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/u;
   assert.doesNotMatch(largeDiff, terminalControls);
   assert.doesNotMatch(controlledDiff, terminalControls);
   assert.doesNotMatch(formatInstallPlan(plan), terminalControls);
   assert.deepEqual(await readFile(largePath), largeBytes);
   assert.deepEqual(await readFile(controlledPath), controlledBytes);
+});
+
+test("skill packages preserve optional frontmatter and recursive references, scripts, and assets", async (t) => {
+  const fixture = await installFixture(t, "justinstack-skill-resources-");
+  const packageRoot = await mutablePackageCopy(fixture, "Package With Skill Resources");
+  const storyRoot = path.join(packageRoot, "skills", "story");
+  await writeFile(path.join(storyRoot, "SKILL.md"), `---
+name: story
+description: >
+  Portable fixture exercising all standard optional
+  frontmatter fields.
+license: Apache-2.0
+compatibility: |-
+  Requires Node.js 20.
+metadata:
+  owner: >-
+    justinstack-test
+  note: ""
+allowed-tools: Read Bash(git:*)
+---
+
+# Story fixture
+`, "utf8");
+  const resources = new Map([
+    ["references/deep/guide.md", "reference fixture\n"],
+    ["scripts/check.js", "console.log('fixture');\n"],
+    ["assets/templates/example.txt", "asset fixture\n"],
+  ]);
+  for (const [relativePath, contents] of resources) {
+    const sourcePath = path.join(storyRoot, ...relativePath.split("/"));
+    await mkdir(path.dirname(sourcePath), { recursive: true });
+    await writeFile(sourcePath, contents, "utf8");
+  }
+
+  const input = versionedOptions(fixture, packageRoot, "3.0.0");
+  const result = await applyInstall(input);
+  const manifest = parseInstallManifest(await readFile(result.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  for (const [relativePath, contents] of resources) {
+    const manifestPath = `story/${relativePath}`;
+    assert.equal(manifest.installations[0]?.entries.some((entry) => entry.path === manifestPath), true);
+    assert.equal(manifest.runtime_entries.some((entry) => entry.path === `runtime/skills/${manifestPath}`), true);
+    assert.equal(
+      await readFile(path.join(fixture.userHome, ".claude", "skills", "story", ...relativePath.split("/")), "utf8"),
+      contents,
+    );
+  }
+});
+
+test("skill package validation rejects names that mismatch the directory or contain consecutive hyphens", async (t) => {
+  const fixture = await installFixture(t, "justinstack-invalid-skill-name-");
+  const packageRoot = await mutablePackageCopy(fixture, "Package With Invalid Skill");
+  const skillPath = path.join(packageRoot, "skills", "story", "SKILL.md");
+  await writeFile(skillPath, `---
+name: invalid--story
+description: This invalid name must be rejected before any install target is written.
+---
+
+# Invalid
+`, "utf8");
+  const input = versionedOptions(fixture, packageRoot, "3.0.0");
+  await assert.rejects(planInstall(input), /name must match its directory/iu);
+  assert.equal(await exists(fixture.justinStackHome), false);
+
+  await writeFile(skillPath, `---
+name: story
+description: Metadata without a mapping must be rejected.
+metadata:
+---
+
+# Invalid metadata
+`, "utf8");
+  await assert.rejects(planInstall(input), /metadata must be a string mapping, not null/iu);
+  assert.equal(await exists(fixture.justinStackHome), false);
+});
+
+test("a journaled pre-manifest crash adopts only entries with durable applied markers", async (t) => {
+  const fixture = await installFixture(t, "justinstack-journal-recovery-");
+  const input = options(fixture, "bob", "global");
+  const unownedPath = path.join(fixture.userHome, ".bob", "skills", "resume-story", "SKILL.md");
+  const canonicalUnowned = await readFile(path.join(PACKAGE_ROOT, "skills", "resume-story", "SKILL.md"));
+  await mkdir(path.dirname(unownedPath), { recursive: true });
+  await writeFile(unownedPath, canonicalUnowned);
+
+  const plan = await planInstall(input);
+  const beforeManifestMutation = plan.entries.filter((entry) =>
+    entry.kind !== "manifest" && (entry.action === "create" || entry.action === "replace" || entry.action === "remove")).length;
+  assert.equal(beforeManifestMutation > 0, true);
+  await assert.rejects(
+    applyInstall(input, { testOnlyAbortAfterMutations: beforeManifestMutation }),
+    /Simulated abrupt installer termination/u,
+  );
+  const journalPath = path.join(fixture.justinStackHome, INSTALL_TRANSACTION_FILENAME);
+  assert.equal(await exists(journalPath), true);
+  assert.equal(await exists(plan.manifestPath), false);
+
+  const retry = await applyInstall(input);
+  assert.equal(await exists(journalPath), false);
+  assert.deepEqual(retry.written, []);
+  const manifest = parseInstallManifest(await readFile(retry.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  const bob = manifest.installations.find((entry) => entry.key === "global:bob");
+  assert.ok(bob);
+  assert.equal(bob.entries.some((entry) => entry.path === "story/SKILL.md"), true);
+  assert.equal(bob.entries.some((entry) => entry.path === "resume-story/SKILL.md"), false);
+  assert.deepEqual(await readFile(unownedPath), canonicalUnowned);
+});
+
+test("recovery revalidates applied targets before committing its manifest", async (t) => {
+  const fixture = await installFixture(t, "justinstack-recovery-manifest-race-");
+  const input = options(fixture, "bob", "global");
+  const plan = await planInstall(input);
+  const beforeManifestMutation = plan.entries.filter((entry) =>
+    entry.kind !== "manifest" && (entry.action === "create" || entry.action === "replace" || entry.action === "remove")).length;
+  await assert.rejects(
+    applyInstall(input, { testOnlyAbortAfterMutations: beforeManifestMutation }),
+    /Simulated abrupt installer termination/u,
+  );
+  const journalPath = path.join(fixture.justinStackHome, INSTALL_TRANSACTION_FILENAME);
+  const victim = plan.entries.find((entry) => entry.kind !== "manifest" && entry.action === "create");
+  assert.ok(victim);
+  const externalBytes = "external recovery writer\n";
+
+  await assert.rejects(
+    applyInstall(input, {
+      testOnlyBeforeRecoveryManifest: async () => writeFile(victim.targetPath, externalBytes, "utf8"),
+    }),
+    /manifest could be committed/u,
+  );
+
+  assert.equal(await readFile(victim.targetPath, "utf8"), externalBytes);
+  assert.equal(await exists(plan.manifestPath), false);
+  assert.equal(await exists(journalPath), true);
+});
+
+test("a non-cooperating target edit is detected before manifest commit and preserved", async (t) => {
+  const fixture = await installFixture(t, "justinstack-pre-manifest-race-");
+  const input = options(fixture, "claude", "global");
+  const plan = await planInstall(input);
+  const victim = plan.entries.find((entry) => entry.kind !== "manifest" && entry.action === "create");
+  assert.ok(victim);
+  const externalBytes = "external writer won the race\n";
+
+  await assert.rejects(
+    applyInstall(plan, {
+      testOnlyBeforeManifest: async () => writeFile(victim.targetPath, externalBytes, "utf8"),
+    }),
+    /manifest could be committed|rollback was incomplete/u,
+  );
+
+  assert.equal(await readFile(victim.targetPath, "utf8"), externalBytes);
+  assert.equal(await exists(plan.manifestPath), false);
+});
+
+test("an unmarked pending create that independently appears is preserved and remains unowned", async (t) => {
+  const fixture = await installFixture(t, "justinstack-journal-ambiguous-");
+  const input = options(fixture, "claude", "global");
+  const initialPlan = await planInstall(input);
+  const orderedTargets = initialPlan.entries.filter((entry) =>
+    entry.kind !== "manifest" && entry.action !== "remove" &&
+    (entry.action === "create" || entry.action === "replace"));
+  const pendingEntry = orderedTargets[1];
+  assert.ok(pendingEntry);
+  await assert.rejects(
+    applyInstall(input, { testOnlyAbortBeforeMutation: 2 }),
+    /Simulated abrupt installer termination/u,
+  );
+  assert.equal(await exists(pendingEntry.targetPath), false);
+  const independentBytes = pendingEntry.sourcePath === null
+    ? Buffer.from(pendingEntry.generatedContents ?? "", "utf8")
+    : await readFile(pendingEntry.sourcePath);
+  await mkdir(path.dirname(pendingEntry.targetPath), { recursive: true });
+  await writeFile(pendingEntry.targetPath, independentBytes);
+
+  await applyInstall(input);
+  assert.deepEqual(await readFile(pendingEntry.targetPath), independentBytes);
+  const manifest = parseInstallManifest(await readFile(initialPlan.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  const owned = pendingEntry.root === "justinstack"
+    ? manifest.runtime_entries
+    : manifest.installations.find((entry) => entry.key === pendingEntry.installationKey)?.entries ?? [];
+  assert.equal(owned.some((entry) => entry.path === pendingEntry.relativePath), false);
+});
+
+test("executable mode is established before an atomic target rename", async (t) => {
+  if (process.platform === "win32") {
+    t.skip("POSIX executable modes are not meaningful on Windows");
+    return;
+  }
+  const fixture = await installFixture(t, "justinstack-pre-rename-mode-");
+  const input = options(fixture, "claude", "global");
+  const plan = await planInstall(input);
+  const ordered = [
+    ...plan.entries.filter((entry) => entry.kind !== "manifest" && entry.action !== "remove" &&
+      (entry.action === "create" || entry.action === "replace")),
+    ...plan.entries.filter((entry) => entry.action === "remove"),
+    ...plan.entries.filter((entry) => entry.kind === "manifest" &&
+      (entry.action === "create" || entry.action === "replace")),
+  ];
+  const launcher = path.join(fixture.justinStackHome, "bin", "justinstack");
+  const launcherIndex = ordered.findIndex((entry) => entry.targetPath === launcher);
+  assert.notEqual(launcherIndex, -1);
+  await assert.rejects(
+    applyInstall(input, { testOnlyAbortAfterMutations: launcherIndex + 1 }),
+    /Simulated abrupt installer termination/u,
+  );
+  assert.equal((await stat(launcher)).mode & 0o777, 0o755);
+  await applyInstall(input);
+  assert.equal((await stat(launcher)).mode & 0o777, 0o755);
+});
+
+test("stale dead-pid installer locks are reclaimed without deleting live contenders", async (t) => {
+  const fixture = await installFixture(t, "justinstack-stale-installer-lock-");
+  const lockBase = path.join(
+    path.dirname(fixture.justinStackHome),
+    `.${path.basename(fixture.justinStackHome)}.installer.lock`,
+  );
+  await writeFile(lockBase, `${JSON.stringify({
+    pid: 2_147_483_647,
+    created_at: "2000-01-01T00:00:00.000Z",
+  })}\n`, "utf8");
+  const staleToken = "00000000-0000-4000-8000-000000000001";
+  await writeFile(`${lockBase}.ticket.1.${staleToken}`, `${JSON.stringify({
+    pid: 2_147_483_647,
+    created_at: "2000-01-01T00:00:00.000Z",
+    token: staleToken,
+  })}\n`, "utf8");
+
+  const [first, second] = await Promise.all([
+    applyInstall(options(fixture, "claude", "global")),
+    applyInstall(options(fixture, "bob", "global")),
+  ]);
+  assert.equal(first.written.length > 0, true);
+  assert.equal(second.written.length > 0, true);
+  assert.equal(await exists(lockBase), false);
+  const lockArtifacts = (await readdir(path.dirname(lockBase)))
+    .filter((name) => name.startsWith(`${path.basename(lockBase)}.`));
+  assert.deepEqual(lockArtifacts, []);
+  const manifest = parseInstallManifest(await readFile(first.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  assert.deepEqual(manifest.installations.map((entry) => entry.key).sort(), ["global:bob", "global:claude"]);
+});
+
+test("malformed installer queue artifacts block while fresh and recover only after aging", async (t) => {
+  const fixture = await installFixture(t, "justinstack-malformed-installer-lock-");
+  const lockBase = path.join(
+    path.dirname(fixture.justinStackHome),
+    `.${path.basename(fixture.justinStackHome)}.installer.lock`,
+  );
+  const token = "11111111-1111-4111-8111-111111111111";
+  const ticket = `${lockBase}.ticket.1.${token}`;
+  await writeFile(ticket, "not-json", "utf8");
+
+  await assert.rejects(applyInstall(options(fixture, "claude", "global")), /lock cannot be safely inspected/u);
+  assert.equal(await exists(ticket), true);
+
+  const old = new Date("2000-01-01T00:00:00.000Z");
+  await utimes(ticket, old, old);
+  await applyInstall(options(fixture, "claude", "global"));
+  assert.equal(await exists(ticket), false);
+
+  await writeFile(lockBase, "truncated", "utf8");
+  await assert.rejects(applyInstall(options(fixture, "bob", "global")), /lock cannot be safely inspected/u);
+  assert.equal(await exists(lockBase), true);
+  await utimes(lockBase, old, old);
+  await applyInstall(options(fixture, "bob", "global"));
+  assert.equal(await exists(lockBase), false);
+
+  const choosing = `${lockBase}.choosing.${token}`;
+  await writeFile(choosing, "", "utf8");
+  await utimes(choosing, old, old);
+  await applyInstall(options(fixture, "bob", "global"));
+  assert.equal(await exists(choosing), false);
+});
+
+test("doctor validates runtime bytes, types, modes, and manifest ownership completeness", async (t) => {
+  const fixture = await installFixture(t, "justinstack-doctor-runtime-");
+  const input = options(fixture, "claude", "global");
+  const install = await applyInstall(input);
+  const [healthy] = await inspectPlatformInstallations(input);
+  assert.equal(healthy?.ok, true);
+  assert.equal(healthy?.installed.some((entry) => entry.startsWith(`${fixture.justinStackHome}${path.sep}`)), true);
+
+  const runtimePackage = path.join(fixture.justinStackHome, "runtime", "package.json");
+  const runtimePackageBytes = await readFile(runtimePackage);
+  await writeFile(runtimePackage, "{\"tampered\":true}\n", "utf8");
+  const [wrongBytes] = await inspectPlatformInstallations(input);
+  assert.equal(wrongBytes?.stale.includes(runtimePackage), true);
+  assert.equal(wrongBytes?.installed.includes(runtimePackage), false);
+  await writeFile(runtimePackage, runtimePackageBytes);
+
+  const manifest = parseInstallManifest(await readFile(install.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  const ownershipPath = "bin/justinstack.js";
+  const ownershipTarget = path.join(fixture.justinStackHome, ...ownershipPath.split("/"));
+  manifest.runtime_entries = manifest.runtime_entries.filter((entry) => entry.path !== ownershipPath);
+  await writeFile(install.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const [ownershipBroken] = await inspectPlatformInstallations(input);
+  assert.equal(ownershipBroken?.ok, false);
+  assert.equal(ownershipBroken?.stale.includes(install.manifestPath), true);
+  assert.equal(ownershipBroken?.stale.includes(ownershipTarget), true);
+
+  const missingTarget = runtimePackage;
+  await rm(missingTarget);
+  const [missingRuntime] = await inspectPlatformInstallations(input);
+  assert.equal(missingRuntime?.missing.includes(missingTarget), true);
+
+  const typeTarget = path.join(fixture.justinStackHome, "runtime", "templates", "context.v1.md");
+  await rm(typeTarget);
+  await mkdir(typeTarget);
+  const [wrongType] = await inspectPlatformInstallations(input);
+  assert.equal(wrongType?.stale.includes(typeTarget), true);
+
+  if (process.platform !== "win32") {
+    const launcher = path.join(fixture.justinStackHome, "bin", "justinstack");
+    await chmod(launcher, 0o644);
+    const [wrongMode] = await inspectPlatformInstallations(input);
+    assert.equal(wrongMode?.stale.includes(launcher), true);
+  }
+});
+
+test("legacy managed review paths remain parseable and are removed only when their hashes match", async (t) => {
+  const fixture = await installFixture(t, "justinstack-legacy-review-");
+  const input = options(fixture, "claude", "global");
+  const install = await applyInstall(input);
+  const legacyBytes = Buffer.from("legacy managed review fixture\n", "utf8");
+  const legacyHash = createHash("sha256").update(legacyBytes).digest("hex");
+  const skillPath = path.join(fixture.userHome, ".claude", "skills", "review", "SKILL.md");
+  const runtimePath = path.join(fixture.justinStackHome, "runtime", "skills", "review", "SKILL.md");
+  await mkdir(path.dirname(skillPath), { recursive: true });
+  await mkdir(path.dirname(runtimePath), { recursive: true });
+  await writeFile(skillPath, legacyBytes);
+  await writeFile(runtimePath, legacyBytes);
+  const manifest = parseInstallManifest(await readFile(install.manifestPath, "utf8"));
+  assert.equal(manifest.schema_version, 2);
+  if (manifest.schema_version !== 2) assert.fail("expected schema-v2 manifest");
+  manifest.runtime_entries.push({ path: "runtime/skills/review/SKILL.md", sha256: legacyHash });
+  const record = manifest.installations.find((entry) => entry.key === "global:claude");
+  assert.ok(record);
+  record.entries.push({ path: "review/SKILL.md", sha256: legacyHash });
+  await writeFile(install.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+  const plan = await planInstall(input);
+  assert.equal(plan.entries.some((entry) => entry.targetPath === skillPath && entry.action === "remove"), true);
+  assert.equal(plan.entries.some((entry) => entry.targetPath === runtimePath && entry.action === "remove"), true);
+  await applyInstall(input);
+  assert.equal(await exists(skillPath), false);
+  assert.equal(await exists(runtimePath), false);
+});
+
+test("omitted projectRoot resolves the enclosing Git top-level from a nested directory", async (t) => {
+  const fixture = await installFixture(t, "justinstack-nested-git-root-");
+  await execFileAsync("git", ["init", fixture.projectRoot], { windowsHide: true });
+  const nested = path.join(fixture.projectRoot, "packages", "nested");
+  await mkdir(nested, { recursive: true });
+  const plan = await planInstall({
+    packageRoot: PACKAGE_ROOT,
+    userHome: fixture.userHome,
+    justinStackHome: fixture.justinStackHome,
+    target: "bob",
+    scope: "project",
+    cwd: nested,
+  });
+  assert.equal(plan.projectRoot, fixture.projectRoot);
+  assert.equal(plan.skillRoots.bob, path.join(fixture.projectRoot, ".bob", "skills"));
+});
+
+test("implicit project-root discovery falls back only outside Git and surfaces unrelated Git failures", async (t) => {
+  const fixture = await installFixture(t, "justinstack-project-root-errors-");
+  const outsideGit = path.join(fixture.root, "Outside Git");
+  await mkdir(outsideGit);
+  const plan = await planInstall({
+    packageRoot: PACKAGE_ROOT,
+    userHome: fixture.userHome,
+    justinStackHome: fixture.justinStackHome,
+    target: "codex",
+    scope: "project",
+    cwd: outsideGit,
+  });
+  assert.equal(plan.projectRoot, path.resolve(outsideGit));
+
+  await assert.rejects(
+    planInstall({
+      packageRoot: PACKAGE_ROOT,
+      userHome: fixture.userHome,
+      justinStackHome: fixture.justinStackHome,
+      target: "codex",
+      scope: "project",
+      cwd: path.join(fixture.root, "missing-directory"),
+    }),
+    /project-root discovery failed/u,
+  );
 });

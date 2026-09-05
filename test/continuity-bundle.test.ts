@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseContinuityBundleState } from "../src/checkpoint/bundle.js";
 import { parseCheckpoint, serializeCheckpoint } from "../src/checkpoint/frontmatter.js";
+import { repositoryIdentity } from "../src/checkpoint/identifiers.js";
 import { CheckpointStore, defaultJustinStackHome, defaultLegacyStateRoot } from "../src/checkpoint/store.js";
 import { replaceSection } from "../src/checkpoint/template.js";
 import { CONTINUITY_BUNDLE_FILES } from "../src/checkpoint/types.js";
@@ -16,6 +17,14 @@ const IDENTITY = { projectSlug: "sample-project", ticketKey: "DEMO-101" } as con
 
 function createStore(home: string): CheckpointStore {
   return new CheckpointStore({ stateRoot: path.join(home, "state"), packageRoot: PACKAGE_ROOT });
+}
+
+function asLegacyV1(source: string, repositoryPath: string): string {
+  return source
+    .replace("schema_version: 2", "schema_version: 1")
+    .replace(/^repository_id:.*$/mu, `repository_path: ${JSON.stringify(path.resolve(repositoryPath))}`)
+    .replace(/^changed_file_count:/mu, "changed_file_summary: []\nchanged_file_count:")
+    .replace(/^untracked_file_count:/mu, "untracked_files: []\nuntracked_file_count:");
 }
 
 test("JustinStack home supports current and legacy environment names with stable precedence", () => {
@@ -187,7 +196,8 @@ test("recovery exposes the complete cross-agent handoff contract from current Gi
   assert.match(recovery.decisions, /context canonical/u);
   assert.match(recovery.completedWork, /bundle layout/u);
   assert.match(recovery.currentWork, /recovery output/u);
-  assert.match(recovery.currentLocalDiffSummary, /sample\.txt/u);
+  assert.match(recovery.currentLocalDiffSummary, /Changed-file count: 1/u);
+  assert.doesNotMatch(recovery.currentLocalDiffSummary, /sample\.txt/u);
   assert.match(recovery.checks, /FAIL/u);
   assert.match(recovery.failures, /needs a retry/u);
   assert.match(recovery.unresolvedQuestions, /retry scope/u);
@@ -201,7 +211,7 @@ test("legacy migration creates a bundle without deleting or silently replacing t
   const sourceHome = await temporaryDirectory(t, "justin-stack-source-");
   const sourceStore = createStore(sourceHome);
   const source = await sourceStore.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
-  const legacySource = serializeCheckpoint(source.checkpoint);
+  const legacySource = asLegacyV1(serializeCheckpoint(source.checkpoint), fixture.root);
 
   const destinationHome = await temporaryDirectory(t, "justin-stack-migration-");
   const store = createStore(destinationHome);
@@ -211,11 +221,14 @@ test("legacy migration creates a bundle without deleting or silently replacing t
   assert.equal((await store.listLegacy(fixture.root)).length, 1);
   assert.equal((await store.list(fixture.root)).length, 0);
 
-  const migrated = await store.migrateLegacy(IDENTITY);
+  const migrated = await store.migrateLegacy(IDENTITY, fixture.root);
   assert.equal(migrated.changed, true);
+  assert.equal(migrated.checkpoint.metadata.schema_version, 2);
+  assert.equal(migrated.checkpoint.metadata.repository_id, repositoryIdentity(fixture.root));
   assert.equal(await readFile(legacyPath, "utf8"), legacySource);
+  assert.doesNotMatch(await readFile(migrated.checkpointPath, "utf8"), /repository_path|changed_file_summary|untracked_files/u);
   assert.deepEqual((await readdir(store.bundlePathsFor(IDENTITY).directory)).sort(), [...CONTINUITY_BUNDLE_FILES].sort());
-  assert.equal((await store.migrateLegacy(IDENTITY)).changed, false);
+  assert.equal((await store.migrateLegacy(IDENTITY, fixture.root)).changed, false);
 
   const legacyCheckpoint = parseCheckpoint(legacySource);
   const changedLegacy = {
@@ -223,5 +236,180 @@ test("legacy migration creates a bundle without deleting or silently replacing t
     body: replaceSection(legacyCheckpoint.body, "Objective", "A conflicting legacy objective."),
   };
   await writeFile(legacyPath, serializeCheckpoint(changedLegacy), "utf8");
-  await assert.rejects(store.migrateLegacy(IDENTITY), /differ; refusing/u);
+  await assert.rejects(store.migrateLegacy(IDENTITY, fixture.root), /differ; refusing/u);
+});
+
+test("checkpoint bundles persist repository identity and Git summaries without paths or file names", async (t) => {
+  const fixture = await createGitRepository(t, { initialFile: "sensitive-client-plan.txt" });
+  await writeFile(fixture.file, "locally changed fixture content\n", "utf8");
+  const home = await temporaryDirectory(t, "justin-stack-private-state-");
+  const store = createStore(home);
+  const created = await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
+  const paths = store.bundlePathsFor(IDENTITY);
+  const rawRepositoryPath = path.resolve(fixture.root);
+  const jsonEscapedRepositoryPath = JSON.stringify(rawRepositoryPath).slice(1, -1);
+
+  assert.equal(created.checkpoint.metadata.repository_id, repositoryIdentity(fixture.root));
+  assert.equal(created.checkpoint.metadata.repository_id.length, 64);
+  assert.equal("repository_path" in created.checkpoint.metadata, false);
+  assert.equal("changed_file_summary" in created.checkpoint.metadata, false);
+  assert.equal("untracked_files" in created.checkpoint.metadata, false);
+
+  for (const fileName of CONTINUITY_BUNDLE_FILES) {
+    const source = await readFile(path.join(paths.directory, fileName), "utf8");
+    assert.equal(source.includes(rawRepositoryPath), false, fileName);
+    assert.equal(source.includes(jsonEscapedRepositoryPath), false, fileName);
+    assert.doesNotMatch(source, /sensitive-client-plan\.txt/u, fileName);
+  }
+
+  const recovery = await store.recovery(IDENTITY, fixture.root);
+  assert.match(recovery.currentLocalDiffSummary, /Changed-file count: 1/u);
+  assert.doesNotMatch(recovery.currentLocalDiffSummary, /sensitive-client-plan\.txt/u);
+});
+
+test("explicit story identity is enforced on every canonical read and mutation path", async (t) => {
+  const fixture = await createGitRepository(t);
+  const home = await temporaryDirectory(t, "justin-stack-identity-");
+  const store = createStore(home);
+  const firstIdentity = { projectSlug: "sample-project", ticketKey: "DEMO-101" } as const;
+  const secondIdentity = { projectSlug: "sample-project", ticketKey: "DEMO-202" } as const;
+  const first = await store.create({ ...firstIdentity, repositoryPath: fixture.root, baseBranch: "main" });
+  const second = await store.create({ ...secondIdentity, repositoryPath: fixture.root, baseBranch: "main" });
+  const secondCheckpoint = await store.load(secondIdentity);
+
+  const legacyPath = store.legacyPathFor(firstIdentity);
+  await mkdir(path.dirname(legacyPath), { recursive: true });
+  await writeFile(legacyPath, await readFile(first.checkpointPath, "utf8"), "utf8");
+
+  const firstPaths = store.bundlePathsFor(firstIdentity);
+  const secondPaths = store.bundlePathsFor(secondIdentity);
+  for (const fileName of CONTINUITY_BUNDLE_FILES) {
+    await copyFile(path.join(secondPaths.directory, fileName), path.join(firstPaths.directory, fileName));
+  }
+  const preserved = new Map<string, string>();
+  for (const [label, paths] of [["first", firstPaths], ["second", secondPaths]] as const) {
+    for (const fileName of CONTINUITY_BUNDLE_FILES) {
+      preserved.set(`${label}/${fileName}`, await readFile(path.join(paths.directory, fileName), "utf8"));
+    }
+  }
+
+  const operations: readonly [string, () => Promise<unknown>][] = [
+    ["load", () => store.load(firstIdentity)],
+    ["bundle health", () => store.bundleHealth(firstIdentity)],
+    ["recovery", () => store.recovery(firstIdentity, fixture.root)],
+    ["create", () => store.create({ ...firstIdentity, repositoryPath: fixture.root, baseBranch: "main" })],
+    ["snapshot", () => store.snapshot(firstIdentity, fixture.root)],
+    ["update", () => store.update({ ...firstIdentity, repositoryPath: fixture.root, body: secondCheckpoint.body })],
+    ["approve plan", () => store.approvePlan({ ...firstIdentity, repositoryPath: fixture.root, body: secondCheckpoint.body })],
+    ["complete", () => store.complete(firstIdentity, fixture.root)],
+    ["legacy migration", () => store.migrateLegacy(firstIdentity, fixture.root)],
+  ];
+  for (const [label, operation] of operations) {
+    await assert.rejects(operation(), /identity does not match its state directory/u, label);
+  }
+
+  const validation = await store.validate(firstIdentity, fixture.root);
+  assert.equal(validation.status, "missing-required-information");
+  assert.match(validation.reasons.join(" "), /identity does not match its state directory/u);
+
+  for (const [label, paths] of [["first", firstPaths], ["second", secondPaths]] as const) {
+    for (const fileName of CONTINUITY_BUNDLE_FILES) {
+      assert.equal(
+        await readFile(path.join(paths.directory, fileName), "utf8"),
+        preserved.get(`${label}/${fileName}`),
+        `${label}/${fileName}`,
+      );
+    }
+  }
+});
+
+test("state roots inside the active repository are rejected before checkpoint writes", async (t) => {
+  const fixture = await createGitRepository(t);
+  const outside = await temporaryDirectory(t, "justin-stack-safe-root-");
+  const unsafeWorkspacesRoot = path.join(fixture.root, ".justin-stack-state");
+  const unsafeLegacyRoot = path.join(fixture.root, ".legacy-state");
+  const canonicalStore = new CheckpointStore({
+    justinStackHome: outside,
+    workspacesRoot: unsafeWorkspacesRoot,
+    legacyStateRoot: path.join(outside, "legacy"),
+    packageRoot: PACKAGE_ROOT,
+  });
+
+  await assert.rejects(
+    canonicalStore.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" }),
+    /state root must be outside the active repository/u,
+  );
+  await assert.rejects(stat(unsafeWorkspacesRoot), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+  const validation = await canonicalStore.validate(IDENTITY, fixture.root);
+  assert.equal(validation.status, "missing-required-information");
+
+  const legacyStore = new CheckpointStore({
+    justinStackHome: outside,
+    workspacesRoot: path.join(outside, "workspaces"),
+    legacyStateRoot: unsafeLegacyRoot,
+    packageRoot: PACKAGE_ROOT,
+  });
+  await assert.rejects(
+    legacyStore.migrateLegacy(IDENTITY, fixture.root),
+    /state root must be outside the active repository/u,
+  );
+  await assert.rejects(stat(unsafeLegacyRoot), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+});
+
+test("concurrent stale-lock reclaimers cannot remove a newly elected writer lease", async (t) => {
+  const fixture = await createGitRepository(t);
+  const home = await temporaryDirectory(t, "justin-stack-lock-election-");
+  const store = createStore(home);
+  await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
+  const paths = store.bundlePathsFor(IDENTITY);
+
+  await unlink(paths.handoff);
+  await writeFile(
+    paths.lock,
+    `${JSON.stringify({ pid: 2_147_483_647, created_at: "2000-01-01T00:00:00.000Z" })}\n`,
+    "utf8",
+  );
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 4 }, async () => store.snapshot(IDENTITY, fixture.root)),
+  );
+  assert.ok(attempts.some((attempt) => attempt.status === "fulfilled"));
+  assert.ok(attempts.some((attempt) => attempt.status === "rejected"));
+  for (const attempt of attempts) {
+    if (attempt.status === "rejected") assert.match(String(attempt.reason), /lock|changed during the update/u);
+  }
+
+  assert.equal((await store.bundleHealth(IDENTITY)).status, "current");
+  const lockPrefix = path.basename(paths.lock);
+  assert.deepEqual(
+    (await readdir(path.dirname(paths.lock))).filter((name) => name.startsWith(lockPrefix)),
+    [],
+  );
+});
+
+test("aged malformed choosing and ticket artifacts are reclaimed without deleting fresh contenders", async (t) => {
+  const fixture = await createGitRepository(t);
+  const home = await temporaryDirectory(t, "justin-stack-malformed-lock-");
+  const store = createStore(home);
+  await store.create({ ...IDENTITY, repositoryPath: fixture.root, baseBranch: "main" });
+  const paths = store.bundlePathsFor(IDENTITY);
+  const token = "11111111-1111-4111-8111-111111111111";
+  const choosing = `${paths.lock}.choosing.${token}`;
+  const ticket = `${paths.lock}.ticket.1.${token}`;
+
+  await unlink(paths.handoff);
+  await writeFile(choosing, "", "utf8");
+  await assert.rejects(store.snapshot(IDENTITY, fixture.root), /lock election did not settle/u);
+  assert.equal((await stat(choosing)).isFile(), true);
+
+  const old = new Date("2000-01-01T00:00:00.000Z");
+  await utimes(choosing, old, old);
+  await store.snapshot(IDENTITY, fixture.root);
+  await assert.rejects(stat(choosing), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+
+  await unlink(paths.handoff);
+  await writeFile(ticket, "not-json", "utf8");
+  await utimes(ticket, old, old);
+  await store.snapshot(IDENTITY, fixture.root);
+  await assert.rejects(stat(ticket), (error: NodeJS.ErrnoException) => error.code === "ENOENT");
+  assert.equal((await store.bundleHealth(IDENTITY)).status, "current");
 });

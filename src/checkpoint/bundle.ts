@@ -46,14 +46,10 @@ function renderProjection(
 function recordedDiffSummary(checkpoint: Checkpoint): string {
   const metadata = checkpoint.metadata;
   if (!metadata.git_dirty) return "Clean at the recorded checkpoint snapshot.";
-  const lines = [
+  return [
     `Recorded changed-file count: ${metadata.changed_file_count}.`,
     `Recorded untracked-file count: ${metadata.untracked_file_count}.`,
-  ];
-  if (metadata.changed_file_summary.length > 0) {
-    lines.push("Recorded changed files:", ...metadata.changed_file_summary.map((entry) => `- ${entry}`));
-  }
-  return lines.join("\n");
+  ].join("\n");
 }
 
 function recordedValidation(checkpoint: Checkpoint): string {
@@ -106,11 +102,7 @@ function renderHandoff(checkpoint: Checkpoint): string {
 }
 
 function cloneMetadata(metadata: Checkpoint["metadata"]): Checkpoint["metadata"] {
-  return {
-    ...metadata,
-    changed_file_summary: [...metadata.changed_file_summary],
-    untracked_files: [...metadata.untracked_files],
-  };
+  return { ...metadata };
 }
 
 function serializeBundleState(state: ContinuityBundleState): string {

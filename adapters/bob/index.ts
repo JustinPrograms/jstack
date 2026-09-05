@@ -46,6 +46,7 @@ export const bobAdapter: PlatformAdapter = {
             hooks: {
               PreToolUse: [
                 {
+                  matcher: "^execute_command$",
                   hooks: [
                     {
                       type: "command",
@@ -73,7 +74,7 @@ export const bobAdapter: PlatformAdapter = {
       {
         id: "bob-list-skills",
         level: "info",
-        message: `Run /list-skills in Bob and verify it discovers skills from ${bobSkillRoot(scope, paths)}.`,
+        message: `In Bob IDE, invoke /justinstack-review or use the Skills UI. In Bob Shell, type $ and select justinstack-review so Bob inserts the $justinstack-review reference, or use /skills; verify discovery from ${bobSkillRoot(scope, paths)}.`,
       },
       {
         id: "bob-proposals-not-applied",

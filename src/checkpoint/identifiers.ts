@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { StoryStackError } from "../errors.js";
 import type { ContinuityBundlePaths } from "./types.js";
@@ -6,6 +7,8 @@ const PROJECT_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const TICKET_PATTERN = /^[A-Z][A-Z0-9]{0,15}-[1-9][0-9]{0,11}$/;
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const PATH_LIKE = /[\\/\0-\x1f\x7f:%]/;
+
+const REPOSITORY_ID_DOMAIN = "justinstack-repository-v1\0";
 
 function rejectPathLikeInput(value: string, label: string): void {
   const candidate = value.trim();
@@ -73,6 +76,16 @@ export function resolveContained(base: string, ...segments: string[]): string {
     return target;
   }
   throw new StoryStackError("Resolved path escapes the story-stack state root", "PATH_TRAVERSAL");
+}
+
+/**
+ * Return a stable, privacy-preserving identifier for a canonical repository
+ * path. The path itself must never be persisted in checkpoint metadata.
+ */
+export function repositoryIdentity(repositoryRoot: string): string {
+  const resolved = path.resolve(repositoryRoot);
+  const comparable = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  return createHash("sha256").update(REPOSITORY_ID_DOMAIN).update(comparable).digest("hex");
 }
 
 export function storyDirectoryPath(workspacesRoot: string, projectSlug: string, ticketKey: string): string {

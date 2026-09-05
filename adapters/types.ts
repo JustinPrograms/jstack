@@ -17,6 +17,10 @@ export interface AdapterPaths {
   projectRoot: string;
   /** Resolved shared runtime root; defaults to <userHome>/.justin-stack. */
   justinStackHome?: string;
+  /** Resolved Claude personal configuration root; defaults to <userHome>/.claude. */
+  claudeConfigDir?: string;
+  /** Resolved Codex configuration root; defaults to <userHome>/.codex. */
+  codexHome?: string;
 }
 
 /** A platform configuration suggestion. Install never applies these entries. */
@@ -63,6 +67,22 @@ export function resolveContextBase(scope: InstallScope, paths: AdapterPaths): st
   return path.resolve(candidate);
 }
 
+function resolveOptionalRoot(candidate: string | undefined, fallback: string, label: string): string {
+  const selected = candidate ?? fallback;
+  if (typeof selected !== "string" || selected.trim().length === 0 || selected.includes("\0")) {
+    throw new TypeError(`Adapter ${label} must be a non-empty path without NUL bytes`);
+  }
+  return path.resolve(selected);
+}
+
+export function resolveClaudeConfigDir(paths: AdapterPaths): string {
+  return resolveOptionalRoot(paths.claudeConfigDir, path.join(resolveContextBase("global", paths), ".claude"), "Claude config root");
+}
+
+export function resolveCodexHome(paths: AdapterPaths): string {
+  return resolveOptionalRoot(paths.codexHome, path.join(resolveContextBase("global", paths), ".codex"), "Codex home");
+}
+
 export function proposal(
   value: Omit<PlatformProposal, "disposition" | "applyAutomatically">,
 ): PlatformProposal {
@@ -81,7 +101,7 @@ export function proposal(
  * deliberately contains none of $, `, %, !, &, |, <, or ^.
  */
 const SAFETY_HOOK_BOOTSTRAP =
-  "import(Buffer.from(process.argv[1],'base64url').toString('utf8')).then(m=>m.main(['safety','hook','--permanent-only'])).then(c=>{process.exitCode=c}).catch(e=>{console.error(e);process.exitCode=1})";
+  "import(Buffer.from(process.argv[1],'base64url').toString('utf8')).then(m=>m.main(['safety','hook','--permanent-only'])).then(c=>{process.exitCode=c}).catch(e=>{console.error(e);process.exitCode=2})";
 
 /** Portable command fragment for a proposal-only PreToolUse guard. */
 export function localSafetyHookCommand(paths: AdapterPaths): string {

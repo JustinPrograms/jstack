@@ -3,6 +3,7 @@ import {
   PERMANENT_SAFETY_INSTRUCTIONS,
   localSafetyHookCommand,
   proposal,
+  resolveClaudeConfigDir,
   resolveContextBase,
   type AdapterPaths,
   type InstallScope,
@@ -10,19 +11,21 @@ import {
 } from "../types.js";
 
 function settingsPath(scope: InstallScope, paths: AdapterPaths): string {
-  const base = resolveContextBase(scope, paths);
   return scope === "project"
-    ? path.join(base, ".claude", "settings.local.json")
-    : path.join(base, ".claude", "settings.json");
+    ? path.join(resolveContextBase(scope, paths), ".claude", "settings.local.json")
+    : path.join(resolveClaudeConfigDir(paths), "settings.json");
 }
 
 function instructionsPath(scope: InstallScope, paths: AdapterPaths): string {
-  const base = resolveContextBase(scope, paths);
-  return scope === "project" ? path.join(base, "CLAUDE.md") : path.join(base, ".claude", "CLAUDE.md");
+  return scope === "project"
+    ? path.join(resolveContextBase(scope, paths), "CLAUDE.md")
+    : path.join(resolveClaudeConfigDir(paths), "CLAUDE.md");
 }
 
 function claudeSkillRoot(scope: InstallScope, paths: AdapterPaths): string {
-  return path.join(resolveContextBase(scope, paths), ".claude", "skills");
+  return scope === "project"
+    ? path.join(resolveContextBase(scope, paths), ".claude", "skills")
+    : path.join(resolveClaudeConfigDir(paths), "skills");
 }
 
 export const claudeAdapter: PlatformAdapter = {
@@ -50,10 +53,15 @@ export const claudeAdapter: PlatformAdapter = {
             permissions: {
               deny: [
                 "Bash(git push *)",
+                "PowerShell(git push *)",
                 "Bash(gh pr create *)",
+                "PowerShell(gh pr create *)",
                 "Bash(gh pr merge *)",
+                "PowerShell(gh pr merge *)",
                 "Bash(glab mr create *)",
+                "PowerShell(glab mr create *)",
                 "Bash(glab mr merge *)",
+                "PowerShell(glab mr merge *)",
               ],
             },
           },
@@ -71,7 +79,7 @@ export const claudeAdapter: PlatformAdapter = {
             hooks: {
               PreToolUse: [
                 {
-                  matcher: "Bash|PowerShell",
+                  matcher: "^(Bash|PowerShell)$",
                   hooks: [{ type: "command", command: hookCommand, timeout: 5 }],
                 },
               ],
@@ -89,6 +97,11 @@ export const claudeAdapter: PlatformAdapter = {
         id: "claude-skill-root",
         level: "info",
         message: `Verify Claude Code can discover skills from ${claudeSkillRoot(scope, paths)}.`,
+      },
+      {
+        id: "claude-invocation",
+        level: "info",
+        message: "Invoke the review skill as /justinstack-review in Claude Code; Claude may also load it automatically from its description.",
       },
       {
         id: "claude-proposals-not-applied",

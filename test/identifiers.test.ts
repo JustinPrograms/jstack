@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   checkpointBundlePaths,
   checkpointPath,
+  repositoryIdentity,
   sanitizeProjectSlug,
   sanitizeTicketKey,
 } from "../src/checkpoint/identifiers.js";
@@ -40,4 +41,17 @@ test("checkpoint paths remain contained by the configured state root", () => {
   assert.equal(path.dirname(bundle.lock), path.dirname(bundle.directory));
   assert.throws(() => checkpointPath(workspacesRoot, "../outside", "DEMO-101"));
   assert.throws(() => checkpointPath(workspacesRoot, "sample-project", "../DEMO-101"));
+});
+
+test("repository identities are deterministic path-obscuring digests", () => {
+  const firstPath = path.resolve("repository-one");
+  const secondPath = path.resolve("repository-two");
+  const first = repositoryIdentity(firstPath);
+  assert.match(first, /^[a-f0-9]{64}$/u);
+  assert.equal(repositoryIdentity(firstPath), first);
+  assert.notEqual(repositoryIdentity(secondPath), first);
+  assert.equal(first.includes(path.basename(firstPath)), false);
+  if (process.platform === "win32") {
+    assert.equal(repositoryIdentity(firstPath.toUpperCase()), first);
+  }
 });

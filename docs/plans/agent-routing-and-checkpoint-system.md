@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: C:\\Users\\Justin\\.gstack\\projects\\justinstack\\main-autoplan-restore-20260904-163011.md -->
+<!-- /autoplan restore point: local gstack project state (machine-specific path omitted) -->
 # Agent routing and continuity checkpoints
 
 ## Objective
@@ -15,8 +15,8 @@ to control a host until that host has a tested execution integration.
   (`light`, `medium`, or `heavy`), recommendation, current host/model if
   explicitly supplied, and rationale in an engine-owned routing record. The
   handoff projects only the concise active summary.
-- A standard and a low-usage policy define a numeric *per-story declared
-  advisory-slot* ceiling,
+- A standard and a low-usage policy define a numeric *declared advisory-slot*
+  ceiling,
   require reuse of recorded findings before new exploration, and distinguish a
   recommendation from a host-enforced limit.
 - Escalation has explicit, testable triggers and evidence. Crossing a configured
@@ -24,14 +24,13 @@ to control a host until that host has a tested execution integration.
   unsupported confidence claim.
 - One coordinator owns checkpoint writes. A resumed agent can identify the
   objective, approved plan, findings, decisions, progress, validation, and
-  exact next action without reading prior chat history.
+  latest persisted next action without reading prior chat history.
 - Checkpoint files do not save source bodies, diffs, secrets, remote data, or
   instructions that can expand the permanent safety boundary.
 - The behavior is consistent for Claude, IBM Bob, and Codex installations, and
   validates on Windows without requiring Bash.
 - Legacy bundles remain readable as `routing: not recorded`; migration is
-  explicit, idempotent, and never erases the existing narrative handoff. A v2
-  reader never consumes an unsealed mixed generation.
+  explicit, idempotent, and never erases the existing canonical handoff.
 
 ## Non-goals
 
@@ -53,7 +52,7 @@ to control a host until that host has a tested execution integration.
   projects recovery views, uses a per-story coordinator lock, and detects drift.
 - `policies/checkpoint-protocol.md` already defines privacy, safety, and
   coordinator-only write rules.
-- `skills/story`, `skills/plan-eng-review`, `skills/review`, and
+- `skills/story`, `skills/plan-eng-review`, `skills/justinstack-review`, and
   `skills/resume-story` define the planning and recovery lifecycle.
 - `adapters/` keeps platform-specific material declarative; canonical workflow
   content must not be duplicated per agent platform.
@@ -78,8 +77,6 @@ Sonnet` and `high_reasoning -> Opus` on a Claude host, or a corresponding GPT
 tier on Codex. V1 defaults to the caller's current model. An unsupported or
 unconfigured mapping produces an explicit `manual choice required` recommendation;
 it must not silently choose a different model or claim a named model was used.
-Each declaration records the effective policy version, source, and digest, so a
-later policy edit cannot make a previous routing decision inexplicable.
 
 ### 2. Execution budgets and task admission
 
@@ -121,28 +118,18 @@ prompt, or is prohibited; `do-not-delegate` remains a valid outcome.
 ### 4. Checkpoint projection model
 
 Keep `context.md` as the canonical narrative handoff and add one engine-owned,
-versioned `routing.json` record. Because routing is canonical data rather than
-a projection, bundle schema v2 stores all payloads in a sealed generation
-directory and makes root `state.json` the atomic pointer to that generation.
-The payload file set is the five Markdown files plus `routing.json`; `state.json`
-hashes those payloads but never itself. Its generation ID is a digest of the
-canonical payload-hash manifest. A reader first parses the state pointer, then
-reads only the named generation and verifies every payload hash. It ignores
-staging directories and refuses an invalid pointer/generation rather than
-consuming mixed, uncommitted files.
-
-Schema-v1 direct-file bundles remain readable as `routing: not recorded`.
-The explicit, idempotent `state upgrade-routing` command copies their validated
-narrative and projections into the first v2 generation with an empty typed
-routing record, verifies it, then atomically publishes the v2 pointer. Old
-binaries cannot validate v2; migration never auto-deletes/downgrades routing or
-rewrites user narrative. This is not a free-form `.justinstack/` directory or a
-live scheduler graph. Its projection mapping is:
+versioned `routing.json` record to the existing continuity bundle. This is a
+small explicit bundle-schema migration, not a free-form `.justinstack/`
+directory or a live scheduler graph. `state.json` hashes `routing.json`; the
+record is parsed/serialized only by the checkpoint engine and is written before
+the state-last commit marker. Legacy bundle schema v1 remains readable with an
+empty `routing: not recorded` view, and the migration creates the new record
+without rewriting user narrative content. Its mapping is:
 
 | Requested concept | Canonical source / projection |
 | --- | --- |
 | `session.md` | checkpoint metadata, current work, coordinator, execution mode, and active routing summary |
-| `plan.md` | approved plan and exact next action |
+| `plan.md` | approved plan and latest persisted next action |
 | `findings.md` | pending review feedback and blockers/questions |
 | `decisions.md` | existing decisions projection, including escalation rationale |
 | `progress.md` | existing progress projection, validation, and next action |
@@ -150,17 +137,13 @@ live scheduler graph. Its projection mapping is:
 The engine must own `routing.json` and projection output. Delegates return
 structured observations to the coordinator; they never write checkpoint files
 directly. Generic `state update --body-file` preserves the routing record but
-cannot create, alter, or delete task data. A failed write before the pointer
-commit leaves the prior sealed generation readable; a pointer or payload hash
-mismatch is an integrity failure, not a repair that silently recreates routing
-data. Only deterministic Markdown projections may be regenerated from a
-verified `context.md` plus routing record. State is saved after a material
+cannot create, alter, or delete task data. State is saved after a material
 decision, a completed logical unit, a failed or escalated attempt, a completed
-validation, and before a long-running operation. `state routing
-reconcile-resume`—not read-only recovery—converts unreleased declarations to
-`unknown-after-resume`. If a future execution runner needs observed leases or a
-live task graph, it gets a separate versioned ledger and host lifecycle
-integration; only its active summary is projected into the handoff.
+validation, and before a long-running operation. Resumption converts any
+unreleased declared task to `unknown-after-resume` rather than pretending it is
+still active. If a future execution runner needs observed leases or a live task
+graph, it gets a separate versioned ledger and host lifecycle integration;
+only its active summary is projected into the handoff.
 
 ### 5. Safe platform integration
 
@@ -190,15 +173,10 @@ canonical skills / CLI
           v                                                  |
   checkpoint coordinator <---- structured finding / result ---+
           |
-          +--> stage a full payload generation under the story lock
-                         |
-                         +--> context.md + routing.json + deterministic projections
-                                             |
-                                             +--> verify payload hash manifest
-                                                            |
-                                                            +--> atomically publish state.json pointer
-
-  reader: state pointer -> named generation -> verify all payload hashes -> recovery view
+          +--> context.md (canonical narrative) + routing.json (engine-owned record)
+          |                    |                         |
+          |                    +--> decisions/progress/checks/handoff views
+          +--> state.json hashes every bundle file and is written last
 
 Future, separately approved execution-host milestone:
 
@@ -214,54 +192,41 @@ Future, separately approved execution-host milestone:
    explicit host/model input, retry evidence, escalation thresholds, cost
    boundary, `do-not-delegate`, policy precedence, and result/exit states.
    Keep defaults conservative and explain that the current model remains in use.
-2. Define the versioned engine-owned `routing.json` schema: task IDs, complete
-   lifecycle transition table and idempotency rules, normalized scopes, slot
-   claim/release data, effective policy provenance/hash, evidence, cardinality/
-   history limits, typed privacy validation, and concise field-to-projection
-   map. Refuse raw prompts, URLs, source/diff-like bodies, credentials,
-   multiline injection, unbounded strings, and unrecognized enums.
-3. Define bundle v2 before implementation: `BundlePayloadFile` is five Markdown
-   payloads plus `routing.json` (never self-hashed `state.json`); schema v2
-   state is an atomic pointer to one immutable payload generation and its
-   manifest digest. Parse both v1 and v2. `state upgrade-routing` performs the
-   explicit idempotent v1-to-v2 conversion; it is distinct from existing
-   `state migrate`, which moves a legacy-location checkpoint. Specify that old
-   binaries report v2 unsupported and no automatic downgrade/deletion occurs.
-4. Implement generation transactions under the existing story lock: build and
-   fsync a new generation, validate all payload hashes, atomically publish the
-   state pointer last, and retain the previous sealed generation until a later
-   successful cleanup. Readers load the pointer first and never consume
-   top-level/staging/mixed files. Extend fault injection and repair semantics:
-   projections may be regenerated only from verified canonical inputs; corrupt
-   routing/pointer data is an integrity failure, never an empty replacement.
-5. Add a dedicated `state routing` dispatcher with `assess` (pure), `declare`,
-   `record-attempt`, `complete`, `abandon`, `inspect`, and
-   `reconcile-resume`. Accept structured input files for task/evidence data;
-   each mutating command verifies canonical identity and current Git state
-   before writing. Read-only recovery reports routing but never mutates it.
-   Emit one machine-readable result for `--json`.
-6. Implement advisory validation: report per-story declared-slot excess,
-   normalized-scope conflict, missing low-usage attestation, escalation
-   threshold, user-approval boundary, and `do-not-delegate`. Do not imply a
-   host action was blocked or a model was selected/observed without explicit
-   input.
-7. Update canonical workflow skills to classify work before delegation, read
+2. Define the versioned engine-owned `routing.json` schema: task IDs,
+   lifecycle/status transitions, normalized scopes, slot claim/release data,
+   evidence, cardinality/history limits, privacy limits, and the concise
+   field-to-projection map. Specify schema-v1 legacy read, idempotent upgrade,
+   and downgrade behavior before code changes.
+3. Migrate the continuity bundle atomically: add `routing.json` to the typed
+   file set and state hashes, extend bundle-state validation, publish it before
+   `state.json`, and preserve existing context/projections. `state update
+   --body-file` must be unable to erase routing data. Extend recovery with an
+   explicit routing summary and stale/unknown-after-resume reconciliation.
+4. Add coordinator APIs and narrow CLI commands that assess, declare, complete,
+   abandon, and inspect a routing record. Accept structured input files for
+   task/evidence data; every command verifies canonical identity and current Git
+   state before writing. Emit a single machine-readable result for `--json`.
+5. Implement advisory validation: report declared-slot excess, normalized-scope
+   conflict, missing low-usage attestation, escalation threshold, user-approval
+   boundary, and `do-not-delegate`. Do not imply a host action was blocked or a
+   model was selected/observed without explicit input.
+6. Update canonical workflow skills to classify work before delegation, read
    state before exploration, require structured delegate findings, and
    checkpoint at the named boundaries. Describe standard and low-usage behavior
    without tying the source skill to a provider brand.
-8. Update adapters, `doctor`, and installation output with local-only policy
+7. Update adapters, `doctor`, and installation output with local-only policy
    validation, manual host configuration, advisory limitations, a compatibility
    matrix, and sanitized `doctor --json` support guidance. Keep proposals
    non-mutating.
-9. Add a Windows-safe first-run tutorial: initialize, inspect effective policy,
+8. Add a Windows-safe first-run tutorial: initialize, inspect effective policy,
    assess/record from a file, manually delegate, record the result, and recover
    after interruption. Include expected `--json` output and plainly say no host
    is spawned, capped, or model-switched.
-10. Dogfood a manual local study across interrupted/resumed stories. Compare
+9. Dogfood a manual local study across interrupted/resumed stories. Compare
    time-to-correct-next-action, repeated-inspection count, missing-decision
    rate, and unnecessary-escalation rate against a recorded baseline. Advance
    only if predeclared thresholds improve without unsafe persistence.
-11. Only after a host exposes a supported lifecycle API and dogfood evidence
+10. Only after a host exposes a supported lifecycle API and dogfood evidence
     shows the advisory policy helps, write a separate RFC for host enforcement,
     observed leases, and real admission control.
 
@@ -273,8 +238,8 @@ Future, separately approved execution-host milestone:
 | Two agents overwrite context | existing story lock plus declared scope comparison | coordinator remains sole checkpoint writer; report conflict but do not claim execution observation | one coordinator owns state | scope/lock integration test |
 | Low-usage run fan-outs | declared-slot and attestation validation | return `policy-exception` or `do-not-delegate`; require a concise rationale | predictable one-delegate exception | policy CLI test |
 | Agent repeats failed work | controlled approach-category evidence | require a materially different category before the next counted attempt | escalation or new approach is visible | retry-state test |
-| Checkpoint generation is interrupted | state pointer/hash verification | prior sealed generation remains readable; invalid pointer/payload is refused, not silently repaired | coherent prior handoff or explicit integrity error | stage-by-stage fault test |
-| Routing input contains unsafe content | typed routing privacy/schema validation | reject and request a concise safe rationale | no sensitive material persisted | routing-schema/privacy test |
+| Checkpoint is interrupted | content hashes and state-last write | recovery detects and repairs projections | resumable handoff remains intact | atomic-write recovery test |
+| Handoff contains unsafe content | existing privacy/schema validation | reject and request a concise paraphrase | no sensitive material persisted | schema/privacy test |
 | Legacy bundle lacks routing record | schema-v1 bundle inspection | return `routing: not recorded`; explicit idempotent migration creates the record | non-destructive upgrade path | migration fixture test |
 | Product overreaches into an unenforceable scheduler | host capability contract is absent | retain advisory scope; defer execution integration | honest capability boundary | adapter contract test |
 
@@ -285,7 +250,7 @@ Future, separately approved execution-host milestone:
 | Policy precedence, defaults, malformed policy, and invalid aliases | unit | `npm test` |
 | Capability recommendation, manual-choice, approval, exception, and do-not-delegate result/exit states | unit | `npm test` |
 | Declared slot, normalized scope, low-usage attestation, and retry threshold | unit/integration | `npm test` |
-| V1/v2 compatibility, generation migration, generic update preservation, locks, CAS, and stage-by-stage interrupted publish | integration | `npm test` |
+| Legacy bundle compatibility, routing-record migration, generic update preservation, locks, CAS, and interrupted repair | integration | `npm test` |
 | Windows path/spaces, PowerShell/cmd launchers, and no-Bash behavior | CLI/integration | `npm test` on Windows |
 | Adapter proposals remain non-mutating | adapter/CLI | `npm test` |
 | Full build/typecheck | build | `npm run build` |
@@ -296,9 +261,8 @@ Future, separately approved execution-host milestone:
    peer-authored Markdown files.
 2. Make `light`, `medium`, and `heavy` complexity classes portable; provider
    model names are optional user mappings and v1 retains the current model.
-3. Set `standard` to three per-story declared advisory slots total and
-   `low-usage` to one coordinator slot by default, allowing one attested
-   delegate as an exception.
+3. Set `standard` to three declared advisory slots total and `low-usage` to one
+   coordinator slot by default, allowing one attested delegate as an exception.
 4. Require evidence-based escalation, an explicit cost ceiling, and a
    `do-not-delegate` decision before extra agent work.
 5. Defer scheduler, automatic routing, and live task-ledger enforcement until
@@ -324,9 +288,10 @@ continuity work, not compete with it.
 
 ### Premise challenge
 
-1. The valuable problem is avoiding repeated discovery after usage limits,
-   compaction, and agent handoffs. That is directly aligned with JustinStack's
-   stated product, and the current bundle already addresses part of it.
+1. The valuable problem is avoiding repeated discovery after the latest
+   successful checkpoint, compaction, and agent handoffs. That is directly
+   aligned with JustinStack's stated product, and the current bundle already
+   addresses part of it without promising a final save at an abrupt cutoff.
 2. The premise that a portable package can choose models or cap concurrency is
    false today. `adapters/types.ts` exposes only skill paths, proposals, and
    doctor reminders; no adapter can discover a model, start a delegate, or
@@ -399,7 +364,7 @@ prove recovery and Windows behavior before any adapter guidance changes.
 | routing recommendation | label is mistaken for host enforcement | yes, wording and contract limit v1 to advisory | planned | manual choice, not a false success | decision record |
 | model escalation | automatic spend crosses the user's budget | yes, policy ceiling controls prompt/prohibit behavior | planned | explicit escalation recommendation | decision record |
 | delegate result | verbose source or secret enters state | yes, current privacy gate rejects it | existing + planned | safe rejection | existing validation |
-| checkpoint recovery | partial projection exists after interruption | v1 behavior detects repairable drift; v2 sealed generations retain the prior committed view | existing + planned | explicit repair or integrity outcome | existing health + fault tests |
+| checkpoint recovery | partial projection exists after interruption | yes, state-last and repair detect it | existing | repairable bundle report | existing health view |
 
 No row has the combination of unrescued, untested, and silent behavior. The
 new policy must preserve that property.
@@ -479,335 +444,3 @@ want, and avoids claiming a capability that no current adapter owns. One
 material product-direction challenge is intentionally held for the final gate:
 whether to accept advisory-first scope or insist on an execution host as a new
 separate project.
-
-## DX review: developer workflow and operability
-
-### Product classification and developer persona
-
-This is a developer-facing local CLI, TypeScript library, and installed skill
-pack, not a runtime that owns agent execution. The primary persona is an
-independent engineer working across Claude, Bob, or Codex in a Windows-capable
-repository: they have a limited usage budget, may switch agent/session midway,
-and need a reliable next action without giving a local tool their provider
-credentials or a background daemon.
-
-> “I need a quick answer to whether this task deserves a second agent. I want
-> the choice, evidence, and handoff preserved locally—but I do not want a tool
-> claiming it changed a model, launched someone, or knows my bill when it did
-> none of those things.”
-
-### DX premise and competitive target
-
-No external competitive benchmark is needed to decide this local workflow. The
-relevant bar is a user who can install a local CLI, understand its limits, make
-one safe routing decision, and resume it on Windows without reading source.
-The target is a two-minute time-to-first-useful-output from an existing story,
-with one copyable end-to-end path. This is a **DX POLISH** decision: it makes
-the recommended advisory scope legible rather than expanding provider control.
-
-### Magical moment and first-run journey
-
-The magical moment is a user providing a small structured task file and seeing
-one unambiguous local result such as: low-usage has no delegate by default,
-the current model remains unchanged, the exact reason is stored, and the next
-checkpoint action is shown. It must take under two minutes and work from
-PowerShell or `cmd`, not require Bash.
-
-| Stage | User action | Product response | Friction to remove |
-| --- | --- | --- | --- |
-| 1. Orient | Read the routing overview after existing `state init` docs | states “advisory; does not spawn/cap/switch models” before any command | do not bury the limitation in adapter docs |
-| 2. Configure | inspect effective project/user policy | shows source, precedence, safe defaults, and unconfigured host mapping | distinguish invalid configuration from unknown host capability |
-| 3. Assess | pass a structured task file | returns class, current-model default, declared slot impact, and reason | avoid fragile long flags on Windows |
-| 4. Decide | accept, request approval, or choose do-not-delegate | records a typed result and concise attestation where required | do not present an advisory warning as an error |
-| 5. Delegate manually | user starts any host worker themselves | skill gives bounded inputs/expected findings only | never imply the CLI observed its lifecycle |
-| 6. Close or escalate | record outcome/evidence | returns exactly one result state and checkpoint update | no raw prompts or source-body fingerprints |
-| 7. Resume | run recovery, then explicitly reconcile if needed | shows sealed routing summary and exact next action | only reconciliation may mark a declaration `unknown-after-resume` |
-
-### Result and configuration contract
-
-Policy discovery must be predictable: project-local policy overrides optional
-user policy; no file means conservative built-in defaults; a malformed file is
-a nonzero structured error; absent host/model information is `unknown`; and an
-unconfigured or unsupported mapping is the valid advisory result
-`manual-choice-required`. `doctor` validates syntax only and says that provider
-availability was not checked. A user supplied model name is recorded as
-supplied, not observed.
-
-The CLI result matrix is part of the public DX contract:
-
-| State | Meaning | Exit behavior |
-| --- | --- | --- |
-| `recommended` | valid advisory recommendation within policy | success |
-| `manual-choice-required` | valid task; host/model mapping is absent or unsupported | success |
-| `requires-user-approval` | valid escalation crosses configured boundary | success; no record changes beyond the recommendation |
-| `policy-exception` | valid request conflicts with a declared mode and has a recorded exception | success with visible warning |
-| `do-not-delegate` | valid decision to keep work with coordinator | success |
-| structured error | malformed input, unsafe path, invalid transition, or stale identity | nonzero, existing error envelope |
-
-`--json` emits exactly one JSON object; human text belongs only to non-JSON
-mode. Large task or evidence text is passed by a structured input file so that
-PowerShell quoting, paths with spaces, and shell-specific escaping do not
-become the first-run experience.
-
-### Persistence and recovery ergonomics
-
-The independent DX review identified a hard contract gap: prose in the 16
-fixed `context.md` sections cannot be queried, protected against generic body
-replacement, or reliably shown in recovery. The plan therefore adopts the
-typed, versioned `routing.json` record and bundle-state migration described
-above. It must define task IDs, lifecycle transition rules, field bounds,
-history cardinality, normalized relative scopes, controlled approach labels,
-and projection fields. The generic state-body update preserves the record;
-routing changes only use dedicated commands. Recovery reports `not recorded`
-for legacy stories and the sealed declaration state; only explicit reconciliation
-may report `unknown-after-resume` for an unreleased declaration.
-
-### First-time confusion report and required polish
-
-1. **Enforcement confusion:** every command, example, adapter note, and result
-   says “declared advisory slot,” never “active agent limit.”
-2. **Model confusion:** classify complexity, then use current model unless a
-   user mapping exists; do not fabricate host discovery or cost estimates.
-3. **Low-usage confusion:** the one-delegate exception requires a concise
-   coordinator attestation, not an unobservable economic calculation.
-4. **Escalation confusion:** publish the single threshold matrix—one bounded
-   light failure, two materially different medium failures, or a named severity
-   trigger—and a privacy-safe evidence shape.
-5. **Compatibility confusion:** provide a host matrix, supported-version
-   verification steps, and sanitized `doctor --json` attachment guidance.
-6. **Upgrade confusion:** show legacy `not recorded`, explicit migration,
-   preservation during generic updates, downgrade behavior, and repair rules.
-
-### DX scorecard
-
-| Dimension | Current | Planned target | Release condition |
-| --- | --- | --- | --- |
-| Getting started | 4/10 | 8/10 | Windows-safe five-step tutorial and example fixture |
-| API/CLI clarity | 5/10 | 8/10 | narrow verbs, typed input files, result/exit matrix |
-| Error recovery | 6/10 | 8/10 | legacy/stale/scope outcomes explain next action |
-| Documentation | 5/10 | 8/10 | advisory limits and first-run flow are prominent |
-| Upgrade path | 6/10 | 8/10 | idempotent bundle migration and downgrade contract |
-| Environment fit | 7/10 | 9/10 | PowerShell/cmd paths verified; no Bash requirement |
-| Support/compatibility | 4/10 | 6/10 | compact matrix and sanitized support artifact |
-| DX measurement | 3/10 | 7/10 | local manual dogfood rubric; no telemetry |
-
-### Local dogfood measurement
-
-Before proposing host enforcement, run at least five interrupted/resumed local
-stories with a recorded no-routing baseline. For each, record time from resume
-to a correct next action, repeated repository-inspection count, missing decision
-fields, and unnecessary escalation. “Correct” means the next action matches
-the current worktree/plan and does not duplicate already recorded discovery.
-Advance only when the advisory path improves time and repeated inspection in a
-predeclared majority of stories, records no unsafe content, and introduces no
-unresolved migration/recovery defect. Store the study locally and in summary
-form only.
-
-### DX validation additions
-
-- Test policy precedence, missing/unknown/unconfigured/unsupported mappings,
-  and local-syntax-only doctor output.
-- Test every JSON result/exit state without mixed prose, including required
-  approval, exception, and do-not-delegate.
-- Add legacy and mixed old/new bundle fixtures; prove a generic body update
-  cannot delete routing data and recovery reports its state correctly.
-- Test stale declaration reconciliation, scope conflicts, bounded evidence,
-  long paths/spaces, and PowerShell/cmd launcher examples.
-- Run documentation examples as CLI fixtures and verify no example claims that
-  the host spawned a delegate, enforced a cap, or switched a model.
-
-### Independent DX review consensus
-
-| Question | Primary DX review | Independent review | Resolution |
-| --- | --- | --- | --- |
-| Can Markdown alone meet task-state acceptance? | no | no | use typed routing record plus migration |
-| Can v1 measure active hosts or cost? | no | no | call slots/cost attestations advisory |
-| Is policy discovery currently sufficient? | no | no | versioned local policy and resolver contract |
-| Is the first-run flow specified? | not yet | no | add Windows-safe file-based tutorial |
-| Is recovery/legacy behavior specified? | incomplete | no | typed recovery and migration fixtures |
-
-The DX gate is satisfied only by shipping the explicit CLI, file-format,
-result-state, migration, and tutorial contracts—not by adding more prose to
-agent prompts.
-
-## Engineering review: data integrity and implementation plan
-
-### Repository-grounded architecture decision
-
-`src/checkpoint/types.ts` currently fixes bundle schema v1 and a five-Markdown
-payload set. `src/checkpoint/bundle.ts` derives every bundle file from
-`context.md`, and `src/checkpoint/store.ts` repairs drift by rendering those
-projections under a per-story lock and then writing `state.json` last.
-`src/cli.ts` exposes only two-token `state <action>` commands; its existing
-`state migrate` already means legacy-location migration. `adapters/types.ts`
-contains installation paths and proposal-only reminders, not an agent runtime.
-
-Routing cannot be another render-only projection: a repair from `context.md`
-would lose task lifecycle/evidence state. The chosen architecture is therefore
-two canonical inputs—narrative `context.md` and typed `routing.json`—sealed
-with their projections in immutable generation directories. `state.json` is a
-manifest pointer, not a self-hashed payload. This is the smallest reliable
-change that supports task state without claiming host control.
-
-```text
-policy file + structured task input
-              |
-              v
- pure policy/scope/privacy/transition modules ----> advisory result
-              |                                      (JSON or human)
-              v
- coordinator store transaction, per-story lock
-              |
-              +--> load and verify current state pointer + payload manifest
-              +--> preserve context + routing unless dedicated routing mutation
-              +--> create immutable generation / validate all hashes
-              +--> atomically replace root state pointer
-              |
-              v
- recovery reads the sealed generation only -> summary/projections/next action
-```
-
-### Data contracts and migration
-
-- Introduce a `BundlePayloadFile` union for the five Markdown payloads plus
-  `routing.json`; `ContinuityBundleFile` adds but never self-hashes
-  `state.json`. Version the manifest parser as a discriminated v1/v2 union.
-- A v2 manifest holds the active generation name, payload-hash map, manifest
-  digest, checkpoint metadata, and identity. Its digest is computed from a
-  canonical serialization of payload hashes, avoiding a state self-reference.
-- Each generation is immutable after pointer publication. The store retains the
-  prior sealed generation during a successful transaction; staging directories
-  are ignored by readers and cleaned only after a later verified write.
-- `state upgrade-routing` is explicit and idempotent. It validates a v1 bundle,
-  copies it into generation one with a bounded empty routing record, verifies
-  the result, then publishes the v2 pointer. It is separate from legacy-path
-  `state migrate`. Old binaries report v2 unsupported. There is no automatic
-  downgrade or routing deletion.
-- `state path`, `show`, `validate`, `bundle-status`, `repair`, and `recovery`
-  must resolve the active generation via the pointer; they cannot keep treating
-  a root `context.md` as authoritative after v2.
-
-### Routing record and transition contract
-
-`routing.json` is a bounded, privacy-validated record rather than a transcript.
-It contains its own schema version, policy provenance/digest, at most the
-configured task/history limits, and tasks with: safe ID, parent ID, class,
-recommendation/result state, declared per-story slot effect, normalized
-read/write scopes, explicit supplied host/model, rationale, lifecycle, and
-bounded evidence. Controlled enums replace prompt or content fingerprints.
-
-Permitted lifecycle transitions must be published and unit-tested:
-
-| From | Allowed transition | Idempotency |
-| --- | --- | --- |
-| absent | `declare` -> `proposed`/`declared` | same ID+payload returns current result |
-| `declared` | `record-attempt`, `complete`, `abandon`, `reconcile-resume` | same mutation is no-op |
-| `unknown-after-resume` | `declare` anew, `complete`, `abandon` | requires explicit coordinator decision |
-| `completed` / `abandoned` | none | terminal; reject mutation |
-
-`assess` is pure. `declare`, `record-attempt`, `complete`, `abandon`, and
-`reconcile-resume` are coordinator-only mutations. Recovery is read-only and
-must never change `declared` to `unknown-after-resume` by implication.
-
-### Correctness, safety, and performance requirements
-
-1. **Commit visibility.** Readers parse `state.json` first and verify every
-   payload in its named immutable generation. A crash before pointer replacement
-   leaves the old pointer/generation current. A corrupt pointer or hash mismatch
-   is a named integrity failure; it is not repaired by inventing an empty route.
-   Fault injection covers staging, every payload write, generation rename, and
-   pointer replacement.
-2. **Concurrency.** The story lock and compare-and-swap compare the sealed
-   manifest generation, not only `context.md`, so routing-only writes cannot
-   race body updates. The declared-slot ceiling is per story; no claim is made
-   about processes outside the record.
-3. **Scope security.** A pure normalizer rejects NUL/control characters,
-   absolute paths, traversal, glob syntax, and non-repository paths; uses
-   canonical segments/separators and Windows case rules; and defines root scope
-   explicitly. Conflict tests use equal, ancestor, descendant, and disjoint
-   paths—not string prefix matching.
-4. **Privacy.** The routing parser applies equivalent or stricter bounds than
-   Markdown: secret detection, URL/source/diff rejection, short safe strings,
-   explicit enums, bounded list lengths, and no content treated as instruction.
-   Projected routing summary is sanitized again before handoff rendering.
-5. **Performance.** No repository-wide scan, provider network call, telemetry,
-   daemon, or process enumeration is introduced. Read/validate work is bounded
-   by one story manifest and its payloads; history compaction is deterministic.
-
-### File-level change map
-
-| Area | Planned change |
-| --- | --- |
-| `src/checkpoint/types.ts`, `identifiers.ts` | v1/v2 manifest types, payload paths, generation IDs, safe scope types |
-| new `src/routing/*` modules | policy, resolver, record schema, privacy, scope normalization, transitions, result types |
-| `src/checkpoint/bundle.ts` | v1/v2 parse, immutable generation render/verify, pointer manifest, safe projection rendering |
-| `src/checkpoint/store.ts` | sealed-generation read, CAS transaction, explicit upgrade, routing mutations, read-only recovery summary |
-| `src/cli.ts` | `state upgrade-routing`; nested `state routing` dispatcher; input-file and JSON/exit contract; pointer-aware state views |
-| `src/installer.ts`, adapters, skills, policy, README | package policy/template allowlist if needed; advisory-only wording; compatibility/tutorial/docs |
-| tests and `package.json` | add routing suite and explicitly add every compiled test file to the existing fixed `node --test` command |
-
-### Test plan and release sequencing
-
-The detailed test artifact is
-`C:\Users\Justin\.gstack\projects\justinstack\justin-main-agent-routing-test-plan-20260904-164500.md`.
-It covers policy/resolver/scope/privacy units; v1/v2 conversion; staged publish
-faults; lock/CAS races; generic update preservation; lifecycle/JSON/exit paths;
-Windows paths and launchers; adapter claims; and executable documentation.
-Because `package.json` enumerates test files explicitly, new tests do not run
-until the script includes them.
-
-Implementation is sequential through contracts and storage (steps 1–6), because
-the CLI and docs depend on their exact result/migration semantics. Once those
-contracts are frozen, documentation/skills/adapter wording can proceed in
-parallel with non-overlapping unit/CLI test work. Do not parallelize routing
-store changes with bundle migration changes in the same worktree.
-
-### Independent engineering review consensus
-
-| Risk | Primary review | Independent review | Resolution |
-| --- | --- | --- | --- |
-| state self-hash and legacy read | identified in v2 design | blocker | payload manifest excludes state; v1/v2 parser + explicit upgrade |
-| routing regenerated as projection | identified | high | two canonical inputs; preserve routing under lock |
-| state-last mixed reads | identified | high | immutable generations + state-pointer-first readers |
-| incomplete lifecycle verbs | identified | high | add dispatcher including record-attempt and explicit reconcile |
-| scope/privacy boundary | identified | medium | pure normalizer and typed privacy schema |
-| test wiring | identified | medium | add explicit test target in `package.json` |
-
-The independent reviewer found advisory-first technically viable after these
-contracts are fixed. A separate Codex CLI review was unavailable in the local
-time window and is not counted as consensus.
-
-## Decision audit trail
-
-| ID | Decision | Classification | Basis | Outcome |
-| --- | --- | --- | --- | --- |
-| D1 | Start with advisory continuity, not cross-provider execution control | User-approved scope resolution | P1 completeness; P4 reuse existing wedge; adapters lack lifecycle APIs | accepted |
-| D2 | Classify work complexity, with optional user-owned provider mappings | Mechanical | P5 explicit; host tiers/cost are not comparable or observable | accepted |
-| D3 | Define `standard` as three and `low-usage` as one per-story declared advisory slots, with one attested exception | Taste | P3 pragmatic; balance visibility and limited usage without false host claims | accepted |
-| D4 | Use a typed engine-owned routing record, not five peer-authored Markdown files or prose sections | Mechanical | P1 complete recovery; P4 preserves existing bundle ownership/lock | accepted |
-| D5 | Upgrade to a sealed v2 generation manifest instead of self-hashing/in-place mutable routing | Mechanical | P5 explicit atomic-reader semantics; independent engineering blocker | accepted |
-| D6 | Keep cost/benefit as coordinator attestation and escalation as evidence plus a user boundary | Mechanical | P5 explicit; billing and host activity are unavailable locally | accepted |
-| D7 | Separate `state upgrade-routing` from legacy-location `state migrate` | Mechanical | P5 avoids ambiguous CLI/migration behavior | accepted |
-| D8 | Require Windows-safe input files, one JSON result, and executable docs | Mechanical | P1 complete DX; P5 clear cross-shell contract | accepted |
-| D9 | Defer observed leases, scheduler admission, automatic model switching, telemetry, and cloud sync | User-approved scope resolution | current product/adapter boundary plus local-first safety | accepted |
-
-## GSTACK REVIEW REPORT
-
-| Review | Result | Material resolution |
-| --- | --- | --- |
-| CEO / strategy | completed | portable recovery is the wedge; advisory-first selected |
-| Design | skipped | no UI surface in scope |
-| Developer experience | completed | typed task state, result contract, Windows tutorial, and measurable dogfood gate added |
-| Engineering | completed | sealed v2 generation manifest, routing lifecycle, migration, security, and test wiring specified |
-| Independent reviewers | completed | strategy, DX, and engineering reviews incorporated |
-| Codex CLI external voice | unavailable | two read-only attempts produced no final response; not treated as consensus |
-
-**Verdict: APPROVED FOR IMPLEMENTATION.** The plan now gives the requested
-LIGHT/MEDIUM/HEAVY discipline, standard/low-usage policy, escalation rule, and
-continuity checkpoints in a form the current product can honestly implement:
-it recommends and records decisions locally, while leaving host execution under
-the user and provider. The approved implementation starts with the policy,
-routing-record, and sealed-bundle-v2 contracts; it must not begin with adapter
-promises or host-control claims.
-
-**UNRESOLVED DECISIONS:** None. The user approved the advisory-first plan.

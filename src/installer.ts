@@ -1,10 +1,12 @@
-import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { chmod, lstat, mkdir, open, readFile, readdir, rm, rmdir, unlink, type FileHandle } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink, type FileHandle } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   expandPlatformTargets,
   getPlatformAdapter,
@@ -20,7 +22,8 @@ import { StoryStackError, errorMessage } from "./errors.js";
 
 export const INSTALL_MANIFEST_SCHEMA_VERSION = 2 as const;
 export const INSTALL_MANIFEST_FILENAME = "install-manifest.json";
-export const INSTALLED_SKILLS = ["story", "plan-eng-review", "review", "resume-story"] as const;
+export const INSTALL_TRANSACTION_FILENAME = ".install-transaction.json";
+export const INSTALLED_SKILLS = ["story", "plan-eng-review", "justinstack-review", "resume-story"] as const;
 
 export type InstalledSkill = (typeof INSTALLED_SKILLS)[number];
 export type InstallRoot = "justinstack" | "story-stack" | "claude-skills" | "bob-skills" | "codex-skills";
@@ -39,6 +42,8 @@ export interface InstallerOptions {
   storyStackHome?: string;
   target?: TargetSelection;
   scope?: InstallScope;
+  /** Starting directory used only when projectRoot is omitted. */
+  cwd?: string;
   projectRoot?: string;
   /** Explicit skill-root overrides, primarily for isolated tests. */
   skillRoots?: Partial<Record<PlatformTarget, string>>;
@@ -46,12 +51,24 @@ export interface InstallerOptions {
   claudeSkillsRoot?: string;
   bobSkillsRoot?: string;
   codexSkillsRoot?: string;
+  /** Optional Claude configuration root (CLAUDE_CONFIG_DIR) for global discovery/proposals. */
+  claudeConfigDir?: string;
+  /** Optional Codex configuration root (CODEX_HOME) for global instructions/config proposals only. */
+  codexHome?: string;
   version?: string;
 }
 
 export interface ApplyInstallOptions {
   /** Required to replace an existing file not proven to be installer-owned. */
   confirmOverwrite?: boolean;
+  /** Test-only abrupt-termination simulation. Leaves the durable journal in place. */
+  testOnlyAbortAfterMutations?: number;
+  /** Test-only termination immediately before the numbered target mutation. */
+  testOnlyAbortBeforeMutation?: number;
+  /** Test-only hook for simulating a non-cooperating writer before manifest commit. */
+  testOnlyBeforeManifest?: () => Promise<void> | void;
+  /** Test-only hook for simulating a writer during recovered manifest commit. */
+  testOnlyBeforeRecoveryManifest?: () => Promise<void> | void;
 }
 
 export interface InstallPaths {
@@ -62,6 +79,8 @@ export interface InstallPaths {
   storyRoot: string;
   skillsRoot: string;
   skillRoots: Partial<Record<PlatformTarget, string>>;
+  claudeConfigDir: string | null;
+  codexHome: string | null;
   manifestPath: string;
 }
 
@@ -69,6 +88,8 @@ export interface InstallCollision {
   targetPath: string;
   kind: CollisionKind;
   sha256: string | null;
+  size: number | null;
+  mode: number | null;
 }
 
 export interface InstallSafetyIssue {
@@ -100,6 +121,7 @@ export interface InstallPlanEntry {
   action: InstallAction;
   managed: boolean;
   previousSha256: string | null;
+  previousMode: number | null;
   collision: InstallCollision | null;
   diff: string | null;
   installationKey: string | null;
@@ -156,6 +178,8 @@ interface NormalizedInstallerOptions {
   scope: InstallScope;
   projectRoot: string;
   skillRoots: Partial<Record<PlatformTarget, string>>;
+  claudeConfigDir?: string;
+  codexHome?: string;
 }
 
 export interface InstallPlan {
@@ -171,6 +195,8 @@ export interface InstallPlan {
   storyRoot: string;
   skillsRoot: string;
   skillRoots: Partial<Record<PlatformTarget, string>>;
+  claudeConfigDir?: string;
+  codexHome?: string;
   manifestPath: string;
   entries: InstallPlanEntry[];
   collisions: InstallCollision[];
@@ -288,20 +314,86 @@ interface BackupRecord {
   persistentPath: string;
 }
 
+type TransactionAction = "create" | "replace" | "remove";
+
+interface InstallTransactionEntry {
+  root: Exclude<InstallRoot, "story-stack">;
+  destination_root: string;
+  relative_path: string;
+  target_path: string;
+  action: TransactionAction;
+  before_sha256: string | null;
+  before_mode: number | null;
+  after_sha256: string | null;
+  after_mode: number | null;
+  backup_path: string | null;
+  state: "pending" | "applied";
+}
+
+interface InstallTransactionJournal {
+  schema_version: 1;
+  transaction_id: string;
+  created_at: string;
+  pid: number;
+  user_home: string;
+  project_root: string;
+  justin_root: string;
+  plan_fingerprint: string;
+  manifest_path: string;
+  manifest_before_sha256: string | null;
+  manifest_before_mode: number | null;
+  manifest_after_sha256: string;
+  manifest_after_mode: number;
+  manifest: InstallManifestV2;
+  entries: InstallTransactionEntry[];
+}
+
+type InstallTransactionPaths = Pick<InstallPaths, "userHome" | "projectRoot" | "justinRoot" | "manifestPath">;
+
 const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_TRANSACTION_BYTES = 4 * 1024 * 1024;
+const MAX_INSTALL_LOCK_BYTES = 4096;
 const MAX_DIFF_BYTES = 32 * 1024;
 const MAX_DIFF_LINES = 120;
 const INSTALL_LOCK_RETRIES = 600;
 const INSTALL_LOCK_DELAY_MS = 25;
+const INSTALL_LOCK_STALE_MS = 30 * 1000;
+const MALFORMED_LOCK_STALE_MS = 5 * 60 * 1000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$/u;
 const INSTALLATION_KEY_PATTERN = /^(?:global:(?:claude|bob|codex)|project:[a-f0-9]{16}:(?:claude|bob|codex))$/u;
+const SKILL_NAME_PATTERN = /^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/u;
+const CURRENT_AND_LEGACY_SKILLS = [...INSTALLED_SKILLS, "review"] as const;
+const SKILL_RESOURCE_DIRECTORIES = new Set(["references", "scripts", "assets"]);
+const OPTIONAL_SKILL_FRONTMATTER = new Set(["license", "compatibility", "metadata", "allowed-tools"]);
+const execFileAsync = promisify(execFile);
 
 function defaultPackageRoot(): string {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   return path.basename(path.dirname(moduleDirectory)) === "dist"
     ? path.resolve(moduleDirectory, "../..")
     : path.resolve(moduleDirectory, "..");
+}
+
+async function enclosingGitRoot(cwd: string): Promise<string> {
+  const resolvedCwd = assertUsableRoot(cwd, "Current working directory");
+  try {
+    const result = await execFileAsync("git", ["-C", resolvedCwd, "rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      windowsHide: true,
+      env: { ...process.env, LC_ALL: "C", LANG: "C" },
+    });
+    const candidate = result.stdout.trim();
+    return assertUsableRoot(candidate, "Git repository root");
+  } catch (error) {
+    const candidate = error as NodeJS.ErrnoException & { stderr?: string; code?: number | string };
+    if (candidate.code === "ENOENT") {
+      throw new StoryStackError("Git is required to discover the project root but was not found on PATH", "GIT_NOT_FOUND");
+    }
+    const detail = (candidate.stderr ?? candidate.message ?? "unknown error").trim();
+    if (/not a git repository/iu.test(detail)) return resolvedCwd;
+    throw new StoryStackError(`Local Git project-root discovery failed: ${detail}`, "GIT_FAILED");
+  }
 }
 
 function digest(contents: string | Uint8Array): string {
@@ -392,6 +484,8 @@ export function resolveInstallPaths(
     | "target"
     | "scope"
     | "projectRoot"
+    | "claudeConfigDir"
+    | "codexHome"
   > = {},
 ): InstallPaths {
   const resolvedHome = assertUsableRoot(userHome, "User home");
@@ -403,10 +497,22 @@ export function resolveInstallPaths(
     overrides.justinStackHome ?? overrides.storyStackHome ?? path.join(resolvedHome, ".justin-stack"),
     "JustinStack home",
   );
+  const claudeConfigDir = overrides.claudeConfigDir === undefined
+    ? null
+    : assertUsableRoot(overrides.claudeConfigDir, "Claude configuration root");
+  const codexHome = overrides.codexHome === undefined
+    ? null
+    : assertUsableRoot(overrides.codexHome, "Codex home");
   const custom = explicitSkillOverrides(overrides);
   const skillRoots: Partial<Record<PlatformTarget, string>> = {};
   for (const platform of targets) {
-    const context: AdapterPaths = { userHome: resolvedHome, projectRoot, justinStackHome: justinRoot };
+    const context: AdapterPaths = {
+      userHome: resolvedHome,
+      projectRoot,
+      justinStackHome: justinRoot,
+      ...(claudeConfigDir === null ? {} : { claudeConfigDir }),
+      ...(codexHome === null ? {} : { codexHome }),
+    };
     skillRoots[platform] = assertUsableRoot(
       custom[platform] ?? getPlatformAdapter(platform).skillRoot(scope, context),
       `${platform} skills root`,
@@ -416,7 +522,11 @@ export function resolveInstallPaths(
       throw new StoryStackError("Runtime and skill roots cannot overlap", "INVALID_INSTALL_ROOT");
     }
     const scopeBoundary = scope === "global" ? resolvedHome : projectRoot;
-    if (skillsRoot !== undefined && !isContained(scopeBoundary, skillsRoot)) {
+    const explicitClaudeBoundary = platform === "claude" && scope === "global" && claudeConfigDir !== null
+      ? claudeConfigDir
+      : null;
+    if (skillsRoot !== undefined && !isContained(scopeBoundary, skillsRoot) &&
+      (explicitClaudeBoundary === null || !isContained(explicitClaudeBoundary, skillsRoot))) {
       throw new StoryStackError(
         `${platform} ${scope} skill root must remain inside the ${scope === "global" ? "user home" : "project root"}`,
         "INVALID_INSTALL_ROOT",
@@ -432,6 +542,8 @@ export function resolveInstallPaths(
     storyRoot: justinRoot,
     skillsRoot: firstRoot,
     skillRoots,
+    claudeConfigDir,
+    codexHome,
     manifestPath: path.join(justinRoot, INSTALL_MANIFEST_FILENAME),
   };
 }
@@ -448,46 +560,244 @@ function installerLockPath(justinRoot: string): string {
   return path.join(path.dirname(justinRoot), `.${path.basename(justinRoot)}.installer.lock`);
 }
 
-async function acquireInstallerLock(paths: InstallPaths): Promise<{ handle: FileHandle; lockPath: string }> {
+interface InstallerLockMetadata {
+  pid: number;
+  created_at: string;
+  token: string | null;
+}
+
+function parseInstallerLockMetadata(source: string): InstallerLockMetadata | null {
+  try {
+    const value = JSON.parse(source) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    if (!Number.isSafeInteger(record.pid) || (record.pid as number) <= 0) return null;
+    if (typeof record.created_at !== "string" || !Number.isFinite(Date.parse(record.created_at))) return null;
+    if (record.token !== undefined && (typeof record.token !== "string" || !/^[a-f0-9-]{36}$/u.test(record.token))) return null;
+    return { pid: record.pid as number, created_at: record.created_at, token: record.token as string | undefined ?? null };
+  } catch {
+    return null;
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+  }
+}
+
+function installerLockIsStale(metadata: InstallerLockMetadata, stats: NonNullable<Awaited<ReturnType<typeof lstatOrNull>>>): boolean {
+  const metadataAge = Date.now() - Date.parse(metadata.created_at);
+  const filesystemAge = Date.now() - stats.mtimeMs;
+  return Math.max(metadataAge, filesystemAge) >= INSTALL_LOCK_STALE_MS && !processIsAlive(metadata.pid);
+}
+
+interface InstallerLockQueueEntry {
+  path: string;
+  ticket: number;
+  token: string;
+}
+
+interface InstallerLockQueue {
+  blocked: boolean;
+  choosing: string[];
+  tickets: InstallerLockQueueEntry[];
+}
+
+function parseInstallerTicketName(name: string, prefix: string): { ticket: number; token: string } | null {
+  if (!name.startsWith(prefix)) return null;
+  const remainder = name.slice(prefix.length);
+  const separator = remainder.indexOf(".");
+  if (separator < 1) return null;
+  const ticket = Number(remainder.slice(0, separator));
+  const token = remainder.slice(separator + 1);
+  if (!Number.isSafeInteger(ticket) || ticket < 1 || !/^[a-f0-9-]{36}$/u.test(token)) return null;
+  return { ticket, token };
+}
+
+async function reclaimInstallerQueueArtifact(candidatePath: string): Promise<boolean> {
+  const stats = await lstatOrNull(candidatePath);
+  if (stats === null) return true;
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.size > MAX_INSTALL_LOCK_BYTES) return false;
+  let source: string;
+  try {
+    source = await readFile(candidatePath, "utf8");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
+  const metadata = parseInstallerLockMetadata(source);
+  const malformedIsStale = metadata === null && Date.now() - stats.mtimeMs >= MALFORMED_LOCK_STALE_MS;
+  if (!(metadata !== null ? installerLockIsStale(metadata, stats) : malformedIsStale)) return false;
+
+  // Claim the exact artifact by atomic rename, then revalidate its own
+  // metadata and age before removal. A concurrent contender cannot inherit a
+  // path between inspection and cleanup, including the legacy base-lock name.
+  const claimPath = path.join(path.dirname(candidatePath), `.${path.basename(candidatePath)}.reclaim.${randomUUID()}.tmp`);
+  try {
+    await rename(candidatePath, claimPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    return false;
+  }
+
+  let removeClaim = false;
+  try {
+    const claimedStats = await lstatOrNull(claimPath);
+    if (claimedStats === null || claimedStats.isSymbolicLink() || !claimedStats.isFile() || claimedStats.size > MAX_INSTALL_LOCK_BYTES) {
+      return false;
+    }
+    const claimedSource = await readFile(claimPath, "utf8");
+    const claimedMetadata = parseInstallerLockMetadata(claimedSource);
+    removeClaim = claimedMetadata === null
+      ? Date.now() - claimedStats.mtimeMs >= MALFORMED_LOCK_STALE_MS
+      : installerLockIsStale(claimedMetadata, claimedStats);
+    if (removeClaim) return true;
+    if (await lstatOrNull(candidatePath) === null) await rename(claimPath, candidatePath);
+    return false;
+  } finally {
+    if (removeClaim) await rm(claimPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function removeOwnedInstallerLease(leasePath: string, token: string): Promise<void> {
+  const claimPath = path.join(path.dirname(leasePath), `.${path.basename(leasePath)}.release.${randomUUID()}.tmp`);
+  try {
+    await rename(leasePath, claimPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  let removeClaim = false;
+  try {
+    const stats = await lstatOrNull(claimPath);
+    const source = stats !== null && stats.isFile() && !stats.isSymbolicLink() && stats.size <= MAX_INSTALL_LOCK_BYTES
+      ? await readFile(claimPath, "utf8").catch(() => null)
+      : null;
+    removeClaim = source !== null && parseInstallerLockMetadata(source)?.token === token;
+    if (!removeClaim && await lstatOrNull(leasePath) === null) await rename(claimPath, leasePath);
+  } finally {
+    if (removeClaim) await rm(claimPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function inspectInstallerLockQueue(lockPath: string): Promise<InstallerLockQueue> {
+  const directory = path.dirname(lockPath);
+  const baseName = path.basename(lockPath);
+  const choosingPrefix = `${baseName}.choosing.`;
+  const ticketPrefix = `${baseName}.ticket.`;
+  const queue: InstallerLockQueue = { blocked: false, choosing: [], tickets: [] };
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name !== baseName && !entry.name.startsWith(choosingPrefix) && !entry.name.startsWith(ticketPrefix)) continue;
+    const candidatePath = path.join(directory, entry.name);
+    const stats = await lstatOrNull(candidatePath);
+    if (stats === null) continue;
+    if (entry.isSymbolicLink() || !entry.isFile() || stats.isSymbolicLink() || !stats.isFile() || stats.size > MAX_INSTALL_LOCK_BYTES) {
+      queue.blocked = true;
+      continue;
+    }
+    let source: string;
+    try {
+      source = await readFile(candidatePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      queue.blocked = true;
+      continue;
+    }
+    const metadata = parseInstallerLockMetadata(source);
+    if (entry.name === baseName) {
+      const malformedIsStale = metadata === null && Date.now() - stats.mtimeMs >= MALFORMED_LOCK_STALE_MS;
+      if ((metadata !== null && installerLockIsStale(metadata, stats)) || malformedIsStale) {
+        if (await reclaimInstallerQueueArtifact(candidatePath)) continue;
+      }
+      queue.blocked = true;
+      continue;
+    }
+    const tokenFromName = entry.name.startsWith(choosingPrefix)
+      ? entry.name.slice(choosingPrefix.length)
+      : parseInstallerTicketName(entry.name, ticketPrefix)?.token ?? "";
+    const malformedIsStale = metadata === null && Date.now() - stats.mtimeMs >= MALFORMED_LOCK_STALE_MS;
+    if ((metadata !== null && installerLockIsStale(metadata, stats)) || malformedIsStale) {
+      if (await reclaimInstallerQueueArtifact(candidatePath)) continue;
+    }
+    if (metadata === null && entry.name.startsWith(choosingPrefix) && /^[a-f0-9-]{36}$/u.test(tokenFromName)) {
+      queue.choosing.push(candidatePath);
+      continue;
+    }
+    if (metadata === null || metadata.token !== tokenFromName) {
+      queue.blocked = true;
+      continue;
+    }
+    if (entry.name.startsWith(choosingPrefix)) {
+      queue.choosing.push(candidatePath);
+      continue;
+    }
+    const ticket = parseInstallerTicketName(entry.name, ticketPrefix);
+    if (ticket === null) queue.blocked = true;
+    else queue.tickets.push({ path: candidatePath, ...ticket });
+  }
+  return queue;
+}
+
+interface InstallerLockLease {
+  path: string;
+  token: string;
+}
+
+async function acquireInstallerLock(paths: InstallPaths): Promise<InstallerLockLease> {
   const lockPath = installerLockPath(paths.justinRoot);
   const lockParent = path.dirname(lockPath);
   const safetyRoot = isContained(paths.userHome, lockPath) ? paths.userHome : lockParent;
   const issue = await inspectParentSafety(safetyRoot, lockPath);
   if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
   await mkdir(lockParent, { recursive: true });
-  for (let attempt = 0; attempt < INSTALL_LOCK_RETRIES; attempt += 1) {
-    let handle: FileHandle | undefined;
-    try {
-      handle = await open(lockPath, "wx", 0o600);
-      await handle.writeFile(`${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString() })}\n`, "utf8");
-      await handle.sync();
-      return { handle, lockPath };
-    } catch (error) {
-      if (handle !== undefined) {
-        await handle.close().catch(() => undefined);
-        await rm(lockPath, { force: true }).catch(() => undefined);
-      }
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      const stats = await lstatOrNull(lockPath);
-      if (stats !== null && (stats.isSymbolicLink() || !stats.isFile())) {
-        throw new StoryStackError(`Installer lock path is unsafe: ${lockPath}`, "UNSAFE_INSTALL_DESTINATION");
+  const token = randomUUID();
+  const choosingPath = `${lockPath}.choosing.${token}`;
+  const owner = `${JSON.stringify({ pid: process.pid, created_at: new Date().toISOString(), token })}\n`;
+  // Publish a recognized queue entry only after its owner record is complete
+  // and flushed. A crash may leave an ignored temporary file, never a partial
+  // choosing entry that strands future installers.
+  await writeFileAtomic(choosingPath, owner);
+
+  let ticketPath: string | null = null;
+  try {
+    const initial = await inspectInstallerLockQueue(lockPath);
+    if (initial.blocked) throw new StoryStackError(`Installer lock cannot be safely inspected: ${lockPath}`, "INSTALL_LOCKED");
+    const ticket = initial.tickets.reduce((maximum, candidate) => Math.max(maximum, candidate.ticket), 0) + 1;
+    if (!Number.isSafeInteger(ticket)) throw new StoryStackError("Installer lock ticket space is exhausted", "INSTALL_LOCKED");
+    ticketPath = `${lockPath}.ticket.${ticket}.${token}`;
+    await rename(choosingPath, ticketPath);
+    for (let attempt = 0; attempt < INSTALL_LOCK_RETRIES; attempt += 1) {
+      const queue = await inspectInstallerLockQueue(lockPath);
+      if (queue.blocked) throw new StoryStackError(`Installer lock cannot be safely inspected: ${lockPath}`, "INSTALL_LOCKED");
+      if (queue.choosing.length === 0) {
+        queue.tickets.sort((left, right) => left.ticket - right.ticket || left.token.localeCompare(right.token, "en"));
+        if (queue.tickets[0]?.path === ticketPath) return { path: ticketPath, token };
       }
       await delay(INSTALL_LOCK_DELAY_MS);
     }
+    throw new StoryStackError(`Another JustinStack install or uninstall still holds the local lock: ${lockPath}`, "INSTALL_LOCKED");
+  } catch (error) {
+    await removeOwnedInstallerLease(ticketPath ?? choosingPath, token).catch(() => undefined);
+    throw error;
   }
-  throw new StoryStackError(
-    `Another JustinStack install or uninstall still holds the local lock: ${lockPath}`,
-    "INSTALL_LOCKED",
-  );
 }
 
-async function withInstallerLock<T>(paths: InstallPaths, operation: () => Promise<T>): Promise<T> {
-  const { handle, lockPath } = await acquireInstallerLock(paths);
+async function withInstallerLock<T>(
+  paths: InstallPaths,
+  operation: () => Promise<T>,
+  recoveryOptions: { testOnlyBeforeManifest?: () => Promise<void> | void } = {},
+): Promise<T> {
+  const lease = await acquireInstallerLock(paths);
   try {
+    await recoverInstallTransaction(paths, recoveryOptions);
     return await operation();
   } finally {
-    await handle.close().catch(() => undefined);
-    await rm(lockPath, { force: true }).catch(() => undefined);
+    await removeOwnedInstallerLease(lease.path, lease.token).catch(() => undefined);
   }
 }
 
@@ -508,17 +818,27 @@ function assertManifestRelativePath(relativePath: unknown): asserts relativePath
 }
 
 function isRuntimePath(relativePath: string): boolean {
+  const skillNames = CURRENT_AND_LEGACY_SKILLS.join("|");
   return (
     /^(?:bin\/(?:justinstack|story-stack)(?:\.js|\.cmd)?|runtime\/package\.json|runtime\/templates\/context\.v1\.md|runtime\/policies\/checkpoint-protocol\.md|policies\/checkpoint-protocol\.md)$/u.test(relativePath) ||
-    /^runtime\/skills\/(?:story|plan-eng-review|review|resume-story)\/(?:SKILL\.md|references\/(?:[^/]+\/)*[^/]+)$/u.test(relativePath) ||
+    new RegExp(`^runtime/skills/(?:${skillNames})/(?:SKILL\\.md|(?:references|scripts|assets)/(?:[^/]+/)*[^/]+)$`, "u").test(relativePath) ||
     /^runtime\/dist\/(?:src|adapters)\/(?:[^/]+\/)*[^/]+\.js$/u.test(relativePath)
   );
 }
 
-function isSkillPath(relativePath: string): boolean {
-  return INSTALLED_SKILLS.some(
-    (skill) => relativePath === `${skill}/SKILL.md` || relativePath.startsWith(`${skill}/references/`),
+function isSkillPathForNames(relativePath: string, skills: readonly string[]): boolean {
+  return skills.some(
+    (skill) => relativePath === `${skill}/SKILL.md` ||
+      [...SKILL_RESOURCE_DIRECTORIES].some((directory) => relativePath.startsWith(`${skill}/${directory}/`)),
   );
+}
+
+function isSkillPath(relativePath: string): boolean {
+  return isSkillPathForNames(relativePath, INSTALLED_SKILLS);
+}
+
+function isManifestSkillPath(relativePath: string): boolean {
+  return isSkillPathForNames(relativePath, CURRENT_AND_LEGACY_SKILLS);
 }
 
 function assertManifestFile(value: unknown, kind: "runtime" | "skill"): asserts value is ManifestFileEntry {
@@ -530,7 +850,7 @@ function assertManifestFile(value: unknown, kind: "runtime" | "skill"): asserts 
     throw new StoryStackError("Install manifest file entry has missing or unknown fields", "INVALID_INSTALL_MANIFEST");
   }
   assertManifestRelativePath(record.path);
-  if ((kind === "runtime" ? !isRuntimePath(record.path) : !isSkillPath(record.path))) {
+  if ((kind === "runtime" ? !isRuntimePath(record.path) : !isManifestSkillPath(record.path))) {
     throw new StoryStackError(`Install manifest path is outside the ${kind} allowlist`, "INVALID_INSTALL_MANIFEST");
   }
   if (typeof record.sha256 !== "string" || !SHA256_PATTERN.test(record.sha256)) {
@@ -552,7 +872,7 @@ function assertLegacyEntry(value: unknown): asserts value is InstallManifestEntr
   assertManifestRelativePath(record.path);
   if (
     (record.root === "story-stack" && !isRuntimePath(record.path) && record.path !== INSTALL_MANIFEST_FILENAME) ||
-    (record.root === "claude-skills" && !isSkillPath(record.path))
+    (record.root === "claude-skills" && !isManifestSkillPath(record.path))
   ) {
     throw new StoryStackError("Install manifest path is outside the owned-file allowlist", "INVALID_INSTALL_MANIFEST");
   }
@@ -731,6 +1051,213 @@ async function listRegularFiles(root: string, required: boolean): Promise<string
   return files;
 }
 
+function parseSkillScalar(raw: string, label: string, allowQuotedEmpty = false): string {
+  const value = raw.trim();
+  if (value.length === 0) {
+    throw new StoryStackError(`${label} must be a non-empty single-line string`, "INVALID_SKILL_FRONTMATTER");
+  }
+  if (value.startsWith('"')) {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (typeof parsed === "string" && (parsed.length > 0 || allowQuotedEmpty)) return parsed;
+    } catch {
+      // Report the stable installer error below.
+    }
+    throw new StoryStackError(`${label} must be a valid quoted string`, "INVALID_SKILL_FRONTMATTER");
+  }
+  if (value.startsWith("'")) {
+    if (!value.endsWith("'") || value.length < 2) {
+      throw new StoryStackError(`${label} must be a valid quoted string`, "INVALID_SKILL_FRONTMATTER");
+    }
+    const parsed = value.slice(1, -1).replace(/''/gu, "'");
+    if (parsed.length > 0 || allowQuotedEmpty) return parsed;
+    throw new StoryStackError(`${label} must be a non-empty string`, "INVALID_SKILL_FRONTMATTER");
+  }
+  if (/^(?:null|~|true|false|[-+]?\d+(?:\.\d+)?)$/iu.test(value) || /^[\[{]/u.test(value)) {
+    throw new StoryStackError(`${label} must be a string`, "INVALID_SKILL_FRONTMATTER");
+  }
+  return value;
+}
+
+function blockScalarStyle(raw: string): "literal" | "folded" | null {
+  const value = raw.trim();
+  if (!/^[|>](?:(?:[+-][1-9]?)|(?:[1-9][+-]?))?$/u.test(value)) return null;
+  return value.startsWith("|") ? "literal" : "folded";
+}
+
+function readSkillBlockScalar(
+  lines: readonly string[],
+  startIndex: number,
+  parentIndent: number,
+  style: "literal" | "folded",
+  label: string,
+): { value: string; nextIndex: number } {
+  const captured: { source: string; indent: number }[] = [];
+  let index = startIndex;
+  for (; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    if (line.trim().length === 0) {
+      captured.push({ source: "", indent: parentIndent + 1 });
+      continue;
+    }
+    const indent = /^\s*/u.exec(line)?.[0].length ?? 0;
+    if (indent <= parentIndent) break;
+    captured.push({ source: line, indent });
+  }
+  const contentIndent = captured
+    .filter((entry) => entry.source.length > 0)
+    .reduce((minimum, entry) => Math.min(minimum, entry.indent), Number.POSITIVE_INFINITY);
+  if (!Number.isFinite(contentIndent)) {
+    throw new StoryStackError(`${label} block scalar must contain text`, "INVALID_SKILL_FRONTMATTER");
+  }
+  const content = captured.map((entry) => entry.source.length === 0 ? "" : entry.source.slice(contentIndent));
+  const value = style === "literal"
+    ? content.join("\n").trimEnd()
+    : content.join("\n").split(/\n{2,}/u).map((paragraph) => paragraph.replace(/\n/gu, " ").trim()).join("\n").trimEnd();
+  if (value.length === 0) {
+    throw new StoryStackError(`${label} block scalar must contain text`, "INVALID_SKILL_FRONTMATTER");
+  }
+  return { value, nextIndex: index };
+}
+
+function validateSkillFrontmatter(source: string, directoryName: string, sourcePath: string): void {
+  const normalized = source.replace(/\r\n/gu, "\n");
+  if (!normalized.startsWith("---\n")) {
+    throw new StoryStackError(`Skill must begin with YAML frontmatter: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+  const end = normalized.indexOf("\n---\n", 4);
+  if (end < 0) {
+    throw new StoryStackError(`Skill frontmatter is not terminated: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+  const fields = new Map<string, string>();
+  const metadata = new Map<string, string>();
+  let acceptsMetadataChildren = false;
+  const lines = normalized.slice(4, end).split("\n");
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index] ?? "";
+    if (line.trim().length === 0 || line.trimStart().startsWith("#")) {
+      index += 1;
+      continue;
+    }
+    if (/^\s/u.test(line)) {
+      if (!acceptsMetadataChildren) {
+        throw new StoryStackError(`Unexpected nested skill frontmatter in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+      }
+      const match = /^(\s+)([^:#][^:]*)\s*:\s*(.*)$/u.exec(line);
+      if (match === null) {
+        throw new StoryStackError(`Invalid metadata entry in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+      }
+      const key = match[2]?.trim() ?? "";
+      if (key.length === 0 || metadata.has(key)) {
+        throw new StoryStackError(`Duplicate or empty skill metadata key in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+      }
+      const rawValue = match[3] ?? "";
+      const style = blockScalarStyle(rawValue);
+      if (style === null) {
+        metadata.set(key, parseSkillScalar(rawValue, `Skill metadata '${key}'`, true));
+        index += 1;
+      } else {
+        const block = readSkillBlockScalar(lines, index + 1, match[1]?.length ?? 0, style, `Skill metadata '${key}'`);
+        metadata.set(key, block.value);
+        index = block.nextIndex;
+      }
+      continue;
+    }
+    const delimiter = line.indexOf(":");
+    if (delimiter <= 0) {
+      throw new StoryStackError(`Invalid skill frontmatter line in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+    }
+    const key = line.slice(0, delimiter).trim();
+    const rawValue = line.slice(delimiter + 1).trim();
+    if (fields.has(key) || (key !== "name" && key !== "description" && !OPTIONAL_SKILL_FRONTMATTER.has(key))) {
+      throw new StoryStackError(`Unknown or duplicate skill frontmatter field '${key}' in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+    }
+    acceptsMetadataChildren = key === "metadata" && rawValue.length === 0;
+    if (key === "metadata") {
+      if (rawValue !== "" && rawValue !== "{}") {
+        throw new StoryStackError(`Skill metadata must be a mapping in ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+      }
+      fields.set(key, rawValue);
+      index += 1;
+    } else {
+      const style = blockScalarStyle(rawValue);
+      if (style === null) {
+        fields.set(key, parseSkillScalar(rawValue, `Skill ${key}`));
+        index += 1;
+      } else {
+        const block = readSkillBlockScalar(lines, index + 1, 0, style, `Skill ${key}`);
+        fields.set(key, block.value);
+        index = block.nextIndex;
+      }
+    }
+  }
+
+  const name = fields.get("name");
+  const description = fields.get("description");
+  if (name === undefined || description === undefined) {
+    throw new StoryStackError(`Skill frontmatter requires name and description: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+  if (!SKILL_NAME_PATTERN.test(name) || name !== directoryName) {
+    throw new StoryStackError(
+      `Skill name must match its directory and use 1-64 lowercase letters, numbers, or single hyphens: ${sourcePath}`,
+      "INVALID_SKILL_FRONTMATTER",
+    );
+  }
+  if (description.length === 0 || description.length > 1024) {
+    throw new StoryStackError(`Skill description must contain 1-1024 characters: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+  if (fields.get("metadata") === "" && metadata.size === 0) {
+    throw new StoryStackError(`Skill metadata must be a string mapping, not null: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+  const compatibility = fields.get("compatibility");
+  if (compatibility !== undefined && compatibility.length > 500) {
+    throw new StoryStackError(`Skill compatibility must contain at most 500 characters: ${sourcePath}`, "INVALID_SKILL_FRONTMATTER");
+  }
+}
+
+async function portableSourceMode(sourcePath: string): Promise<number> {
+  const stats = await lstat(sourcePath);
+  return (stats.mode & 0o111) === 0 ? 0o644 : 0o755;
+}
+
+async function skillPackageFiles(packageRoot: string, skill: InstalledSkill): Promise<string[]> {
+  const sourceRoot = path.join(packageRoot, "skills", skill);
+  const rootStats = await lstatOrNull(sourceRoot);
+  if (rootStats === null) {
+    throw new StoryStackError(`Required installer source directory is missing: ${sourceRoot}`, "MISSING_INSTALL_SOURCE");
+  }
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new StoryStackError(`Installer source directory is unsafe: ${sourceRoot}`, "UNSAFE_INSTALL_SOURCE");
+  }
+  const directEntries = await readdir(sourceRoot, { withFileTypes: true }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new StoryStackError(`Required installer source directory is missing: ${sourceRoot}`, "MISSING_INSTALL_SOURCE");
+    }
+    throw error;
+  });
+  for (const entry of directEntries) {
+    if (entry.isSymbolicLink()) {
+      throw new StoryStackError(`Installer sources cannot contain symbolic links: ${path.join(sourceRoot, entry.name)}`, "UNSAFE_INSTALL_SOURCE");
+    }
+    const allowed = entry.name === "SKILL.md" && entry.isFile() ||
+      SKILL_RESOURCE_DIRECTORIES.has(entry.name) && entry.isDirectory();
+    if (!allowed) {
+      throw new StoryStackError(`Canonical skill entry is outside the supported layout: ${path.join(sourceRoot, entry.name)}`, "UNSAFE_INSTALL_SOURCE");
+    }
+  }
+  const skillPath = path.join(sourceRoot, "SKILL.md");
+  await assertRegularSource(skillPath);
+  validateSkillFrontmatter(await readFile(skillPath, "utf8"), skill, skillPath);
+  const files = await listRegularFiles(sourceRoot, true);
+  for (const sourcePath of files) {
+    const relativePath = `${skill}/${normalizeRelativePath(path.relative(sourceRoot, sourcePath))}`;
+    if (!isSkillPath(relativePath)) {
+      throw new StoryStackError(`Canonical skill file is outside the supported layout: ${sourcePath}`, "UNSAFE_INSTALL_SOURCE");
+    }
+  }
+  return files;
+}
+
 function nodeLauncher(): string {
   return `#!/usr/bin/env node
 async function run() {
@@ -799,10 +1326,11 @@ async function inspectParentSafety(safetyRoot: string, targetPath: string): Prom
 async function inspectCollision(targetPath: string): Promise<InstallCollision | null> {
   const stats = await lstatOrNull(targetPath);
   if (stats === null) return null;
-  if (stats.isSymbolicLink()) return { targetPath, kind: "symbolic-link", sha256: null };
-  if (stats.isDirectory()) return { targetPath, kind: "directory", sha256: null };
-  if (!stats.isFile()) return { targetPath, kind: "other", sha256: null };
-  return { targetPath, kind: "file", sha256: await digestFile(targetPath) };
+  const metadata = { size: stats.size, mode: stats.mode & 0o777 };
+  if (stats.isSymbolicLink()) return { targetPath, kind: "symbolic-link", sha256: null, ...metadata };
+  if (stats.isDirectory()) return { targetPath, kind: "directory", sha256: null, ...metadata };
+  if (!stats.isFile()) return { targetPath, kind: "other", sha256: null, ...metadata };
+  return { targetPath, kind: "file", sha256: await digestFile(targetPath), ...metadata };
 }
 
 function redactDiff(source: string): string {
@@ -815,8 +1343,33 @@ function redactDiff(source: string): string {
     .replace(/(?:ghp|glpat|sk)-[A-Za-z0-9_-]{12,}/gu, "[REDACTED]");
 }
 
-function hashOnlyDiff(beforeSha256: string | null, afterSha256: string, targetPath: string): string {
-  return `--- ${redactDiff(targetPath)}\n+++ ${redactDiff(targetPath)} (proposed)\n@@ binary-or-large-file @@\n- sha256:${beforeSha256 ?? "missing"}\n+ sha256:${afterSha256}\n`;
+function formatMode(mode: number | null): string {
+  return mode === null ? "missing" : `0${(mode & 0o777).toString(8).padStart(3, "0")}`;
+}
+
+function modeMatches(actualMode: number | null, expectedMode: number): boolean {
+  return process.platform === "win32" || actualMode !== null && (actualMode & 0o777) === expectedMode;
+}
+
+function hashOnlyDiff(
+  beforeSha256: string | null,
+  afterSha256: string,
+  targetPath: string,
+  beforeMode: number | null = null,
+  afterMode: number | null = null,
+): string {
+  const metadata = afterMode === null
+    ? []
+    : [`- mode:${formatMode(beforeMode)}`, `+ mode:${formatMode(afterMode)}`];
+  return [
+    `--- ${redactDiff(targetPath)}`,
+    `+++ ${redactDiff(targetPath)} (proposed)`,
+    "@@ content-metadata-only @@",
+    `- sha256:${beforeSha256 ?? "missing"}`,
+    `+ sha256:${afterSha256}`,
+    ...metadata,
+    "",
+  ].join("\n");
 }
 
 function boundedDiff(before: Uint8Array | null, after: Uint8Array, targetPath: string): string {
@@ -859,13 +1412,16 @@ async function normalizeOptions(options: InstallerOptions): Promise<NormalizedIn
   if (!VERSION_PATTERN.test(packageVersion)) throw new StoryStackError("Installer package version is invalid", "INVALID_PACKAGE");
   const target = options.target ?? "claude";
   const scope = options.scope ?? "global";
+  const projectRoot = options.projectRoot ?? await enclosingGitRoot(options.cwd ?? process.cwd());
   const paths = resolveInstallPaths(options.userHome ?? os.homedir(), {
     ...(options.justinStackHome === undefined ? {} : { justinStackHome: options.justinStackHome }),
     ...(options.storyStackHome === undefined ? {} : { storyStackHome: options.storyStackHome }),
-    ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
+    projectRoot,
     ...(options.claudeSkillsRoot === undefined ? {} : { claudeSkillsRoot: options.claudeSkillsRoot }),
     ...(options.bobSkillsRoot === undefined ? {} : { bobSkillsRoot: options.bobSkillsRoot }),
     ...(options.codexSkillsRoot === undefined ? {} : { codexSkillsRoot: options.codexSkillsRoot }),
+    ...(options.claudeConfigDir == null ? {} : { claudeConfigDir: options.claudeConfigDir }),
+    ...(options.codexHome == null ? {} : { codexHome: options.codexHome }),
     ...(options.skillRoots === undefined ? {} : { skillRoots: options.skillRoots }),
     target,
     scope,
@@ -879,6 +1435,8 @@ async function normalizeOptions(options: InstallerOptions): Promise<NormalizedIn
     scope,
     projectRoot: paths.projectRoot,
     skillRoots: paths.skillRoots,
+    ...(paths.claudeConfigDir === null ? {} : { claudeConfigDir: paths.claudeConfigDir }),
+    ...(paths.codexHome === null ? {} : { codexHome: paths.codexHome }),
   };
 }
 
@@ -928,7 +1486,7 @@ function runtimeDescriptors(
     }
     for (const skill of INSTALLED_SKILLS) {
       const sourceRoot = path.join(packageRoot, "skills", skill);
-      for (const sourcePath of await listRegularFiles(sourceRoot, true)) {
+      for (const sourcePath of await skillPackageFiles(packageRoot, skill)) {
         const child = normalizeRelativePath(path.relative(sourceRoot, sourcePath));
         descriptors.push({
           root: "justinstack",
@@ -938,7 +1496,7 @@ function runtimeDescriptors(
           kind: "copy",
           sourcePath,
           generatedContents: null,
-          mode: 0o644,
+          mode: await portableSourceMode(sourcePath),
           installationKey: null,
         });
       }
@@ -980,7 +1538,7 @@ async function skillDescriptors(
   const key = installationKey(scope, target, projectRoot);
   for (const skill of INSTALLED_SKILLS) {
     const sourceRoot = path.join(packageRoot, "skills", skill);
-    for (const sourcePath of await listRegularFiles(sourceRoot, true)) {
+    for (const sourcePath of await skillPackageFiles(packageRoot, skill)) {
       const child = normalizeRelativePath(path.relative(sourceRoot, sourcePath));
       const relativePath = `${skill}/${child}`;
       if (!isSkillPath(relativePath)) {
@@ -994,7 +1552,7 @@ async function skillDescriptors(
         kind: "copy",
         sourcePath,
         generatedContents: null,
-        mode: 0o644,
+        mode: await portableSourceMode(sourcePath),
         installationKey: key,
       });
     }
@@ -1053,15 +1611,19 @@ async function materializeDescriptor(
       action = "unsafe";
       actionableCollision = collision;
     } else if (collision.sha256 === sha256) {
-      action = "unchanged";
       managed = owned.get(targetPath) === collision.sha256;
+      if (managed && !modeMatches(collision.mode, descriptor.mode)) {
+        action = "replace";
+        diff = hashOnlyDiff(collision.sha256, sha256, targetPath, collision.mode, descriptor.mode);
+      } else {
+        action = "unchanged";
+      }
     } else {
       action = "replace";
       managed = owned.get(targetPath) === collision.sha256;
       if (!managed) actionableCollision = collision;
-      const targetStats = await lstat(targetPath);
-      diff = targetStats.size > MAX_DIFF_BYTES
-        ? hashOnlyDiff(collision.sha256, sha256, targetPath)
+      diff = !managed || (collision.size ?? 0) > MAX_DIFF_BYTES
+        ? hashOnlyDiff(collision.sha256, sha256, targetPath, collision.mode, descriptor.mode)
         : boundedDiff(await readFile(targetPath), contents, targetPath);
     }
   }
@@ -1072,6 +1634,7 @@ async function materializeDescriptor(
     action,
     managed,
     previousSha256: collision?.sha256 ?? null,
+    previousMode: collision?.mode ?? null,
     collision: actionableCollision,
     diff,
   };
@@ -1114,6 +1677,7 @@ async function materializeObsolete(
       action: canRemove ? "remove" : "preserve",
       managed: true,
       previousSha256: collision?.sha256 ?? null,
+      previousMode: collision?.mode ?? null,
       collision: null,
       diff: reason,
       installationKey: key,
@@ -1193,6 +1757,7 @@ function planFingerprint(
       targetPath: entry.targetPath,
       sha256: entry.sha256,
       previousSha256: entry.previousSha256,
+      previousMode: entry.previousMode,
       action: entry.action,
       managed: entry.managed,
     })),
@@ -1214,6 +1779,8 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     target: normalized.target,
     scope: normalized.scope,
     skillRoots: normalized.skillRoots,
+    ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+    ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
   });
   const safetyIssues: InstallSafetyIssue[] = [];
   let existing: ExistingManifest | null = null;
@@ -1340,11 +1907,13 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
       manifestManaged = false;
     } else {
       manifestPreviousSha = await digestFile(paths.manifestPath);
-      if (manifestPreviousSha === digest(manifestBytes)) manifestAction = "unchanged";
+      if (manifestPreviousSha === digest(manifestBytes) && modeMatches(manifestStats.mode & 0o777, 0o600)) {
+        manifestAction = "unchanged";
+      }
       else {
         manifestAction = "replace";
-        manifestDiff = manifestStats.size > MAX_DIFF_BYTES
-          ? hashOnlyDiff(manifestPreviousSha, digest(manifestBytes), paths.manifestPath)
+        manifestDiff = !manifestManaged || manifestStats.size > MAX_DIFF_BYTES || manifestPreviousSha === digest(manifestBytes)
+          ? hashOnlyDiff(manifestPreviousSha, digest(manifestBytes), paths.manifestPath, manifestStats.mode & 0o777, 0o600)
           : boundedDiff(await readFile(paths.manifestPath), manifestBytes, paths.manifestPath);
         if (!manifestManaged) manifestCollision = await inspectCollision(paths.manifestPath);
       }
@@ -1364,6 +1933,7 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     action: manifestAction,
     managed: manifestManaged,
     previousSha256: manifestPreviousSha,
+    previousMode: manifestStats === null ? null : manifestStats.mode & 0o777,
     collision: manifestCollision,
     diff: manifestDiff,
     installationKey: null,
@@ -1382,12 +1952,14 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
       userHome: normalized.userHome,
       projectRoot: normalized.projectRoot,
       justinStackHome: paths.justinRoot,
+      ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+      ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
     };
     const adapter = getPlatformAdapter(target);
     for (const proposal of adapter.proposals(normalized.scope, context)) {
       configurationProposals.push(await materializeProposal(
         proposal,
-        normalized.scope === "project" ? paths.projectRoot : paths.userHome,
+        proposalSafetyRoot(target, normalized, paths),
       ));
     }
     doctorReminders.push(...adapter.doctorReminders(normalized.scope, context));
@@ -1404,6 +1976,8 @@ export async function planInstall(options: InstallerOptions = {}): Promise<Insta
     storyRoot: paths.justinRoot,
     skillsRoot: paths.skillsRoot,
     skillRoots: paths.skillRoots,
+    ...(paths.claudeConfigDir === null ? {} : { claudeConfigDir: paths.claudeConfigDir }),
+    ...(paths.codexHome === null ? {} : { codexHome: paths.codexHome }),
     manifestPath: paths.manifestPath,
     entries,
     collisions: entries.flatMap((entry) => entry.collision === null ? [] : [entry.collision]),
@@ -1443,9 +2017,541 @@ async function assertTargetMatchesPlan(entry: InstallPlanEntry): Promise<void> {
     if (current !== null) throw new StoryStackError(`Install target appeared after preflight: ${entry.targetPath}`, "INSTALL_PLAN_STALE");
     return;
   }
-  if (current === null || current.kind !== "file" || current.sha256 !== entry.previousSha256) {
+  if (current === null || current.kind !== "file" || current.sha256 !== entry.previousSha256 ||
+    entry.previousMode !== null && !modeMatches(current.mode, entry.previousMode)) {
     throw new StoryStackError(`Install target changed after preflight: ${entry.targetPath}`, "INSTALL_PLAN_STALE");
   }
+}
+
+function transactionJournalPath(justinRoot: string): string {
+  return path.join(justinRoot, INSTALL_TRANSACTION_FILENAME);
+}
+
+function assertAbsoluteNormalizedPath(value: unknown, label: string): asserts value is string {
+  if (
+    typeof value !== "string" || value.length === 0 || value.length > 4096 ||
+    /[\0-\x1f\x7f]/u.test(value) || !path.isAbsolute(value) || path.resolve(value) !== value ||
+    value === path.parse(value).root
+  ) {
+    throw new StoryStackError(`${label} is invalid`, "INVALID_INSTALL_TRANSACTION");
+  }
+}
+
+function assertTransactionMode(value: unknown, nullable: boolean, label: string): asserts value is number | null {
+  if (nullable && value === null) return;
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > 0o777) {
+    throw new StoryStackError(`${label} is invalid`, "INVALID_INSTALL_TRANSACTION");
+  }
+}
+
+function assertTransactionSha(value: unknown, nullable: boolean, label: string): asserts value is string | null {
+  if (nullable && value === null) return;
+  if (typeof value !== "string" || !SHA256_PATTERN.test(value)) {
+    throw new StoryStackError(`${label} is invalid`, "INVALID_INSTALL_TRANSACTION");
+  }
+}
+
+function manifestEntriesForTransaction(
+  manifest: InstallManifestV2,
+  root: InstallTransactionEntry["root"],
+  destinationRoot: string,
+): ManifestFileEntry[] {
+  if (root === "justinstack") return manifest.runtime_entries;
+  const target = root.slice(0, -"-skills".length) as PlatformTarget;
+  return manifest.installations
+    .filter((record) => record.target === target && record.destination_root !== null && samePath(record.destination_root, destinationRoot))
+    .flatMap((record) => record.entries);
+}
+
+function parseInstallTransaction(source: string, paths: InstallTransactionPaths): InstallTransactionJournal {
+  let value: unknown;
+  try {
+    value = JSON.parse(source) as unknown;
+  } catch {
+    throw new StoryStackError("Install transaction journal is not valid JSON", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new StoryStackError("Install transaction journal must be an object", "INVALID_INSTALL_TRANSACTION");
+  }
+  const record = value as Record<string, unknown>;
+  const expectedKeys = [
+    "created_at", "entries", "justin_root", "manifest", "manifest_after_mode", "manifest_after_sha256",
+    "manifest_before_mode", "manifest_before_sha256", "manifest_path", "pid", "plan_fingerprint", "project_root",
+    "schema_version", "transaction_id", "user_home",
+  ].sort().join(",");
+  if (Object.keys(record).sort().join(",") !== expectedKeys || record.schema_version !== 1) {
+    throw new StoryStackError("Install transaction journal has missing or unknown fields", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (typeof record.transaction_id !== "string" || !/^[0-9a-f-]{36}$/u.test(record.transaction_id)) {
+    throw new StoryStackError("Install transaction id is invalid", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (typeof record.created_at !== "string" || !Number.isFinite(Date.parse(record.created_at))) {
+    throw new StoryStackError("Install transaction timestamp is invalid", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (!Number.isSafeInteger(record.pid) || (record.pid as number) <= 0) {
+    throw new StoryStackError("Install transaction pid is invalid", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (typeof record.plan_fingerprint !== "string" || !SHA256_PATTERN.test(record.plan_fingerprint)) {
+    throw new StoryStackError("Install transaction fingerprint is invalid", "INVALID_INSTALL_TRANSACTION");
+  }
+  assertAbsoluteNormalizedPath(record.user_home, "Install transaction user home");
+  assertAbsoluteNormalizedPath(record.project_root, "Install transaction project root");
+  assertAbsoluteNormalizedPath(record.justin_root, "Install transaction runtime root");
+  assertAbsoluteNormalizedPath(record.manifest_path, "Install transaction manifest path");
+  if (!samePath(record.user_home, paths.userHome) || !samePath(record.justin_root, paths.justinRoot) ||
+    !samePath(record.manifest_path, paths.manifestPath)) {
+    throw new StoryStackError("Install transaction journal belongs to a different runtime", "INVALID_INSTALL_TRANSACTION");
+  }
+  assertTransactionSha(record.manifest_before_sha256, true, "Install transaction prior manifest hash");
+  assertTransactionMode(record.manifest_before_mode, true, "Install transaction prior manifest mode");
+  if ((record.manifest_before_sha256 === null) !== (record.manifest_before_mode === null)) {
+    throw new StoryStackError("Install transaction prior manifest metadata is inconsistent", "INVALID_INSTALL_TRANSACTION");
+  }
+  assertTransactionSha(record.manifest_after_sha256, false, "Install transaction manifest hash");
+  assertTransactionMode(record.manifest_after_mode, false, "Install transaction manifest mode");
+  const serializedCandidateManifest = JSON.stringify(record.manifest);
+  if (serializedCandidateManifest === undefined) {
+    throw new StoryStackError("Install transaction manifest is missing", "INVALID_INSTALL_TRANSACTION");
+  }
+  const parsedManifest = parseInstallManifest(serializedCandidateManifest);
+  if (parsedManifest.schema_version !== INSTALL_MANIFEST_SCHEMA_VERSION ||
+    digest(serializeManifest(parsedManifest)) !== record.manifest_after_sha256 || record.manifest_after_mode !== 0o600) {
+    throw new StoryStackError("Install transaction manifest is inconsistent", "INVALID_INSTALL_TRANSACTION");
+  }
+  if (!Array.isArray(record.entries) || record.entries.length > 10_000) {
+    throw new StoryStackError("Install transaction entries must be a bounded array", "INVALID_INSTALL_TRANSACTION");
+  }
+
+  const entries: InstallTransactionEntry[] = [];
+  const targetPaths = new Set<string>();
+  for (const valueEntry of record.entries) {
+    if (typeof valueEntry !== "object" || valueEntry === null || Array.isArray(valueEntry)) {
+      throw new StoryStackError("Install transaction entry must be an object", "INVALID_INSTALL_TRANSACTION");
+    }
+    const candidate = valueEntry as Record<string, unknown>;
+    const entryKeys = [
+      "action", "after_mode", "after_sha256", "backup_path", "before_mode", "before_sha256", "destination_root",
+      "relative_path", "root", "state", "target_path",
+    ].sort().join(",");
+    if (Object.keys(candidate).sort().join(",") !== entryKeys) {
+      throw new StoryStackError("Install transaction entry has missing or unknown fields", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (candidate.root !== "justinstack" && candidate.root !== "claude-skills" &&
+      candidate.root !== "bob-skills" && candidate.root !== "codex-skills") {
+      throw new StoryStackError("Install transaction entry has an invalid root", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (candidate.action !== "create" && candidate.action !== "replace" && candidate.action !== "remove") {
+      throw new StoryStackError("Install transaction entry has an invalid action", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (candidate.state !== "pending" && candidate.state !== "applied") {
+      throw new StoryStackError("Install transaction entry has an invalid progress state", "INVALID_INSTALL_TRANSACTION");
+    }
+    assertAbsoluteNormalizedPath(candidate.destination_root, "Install transaction destination root");
+    assertAbsoluteNormalizedPath(candidate.target_path, "Install transaction target path");
+    assertManifestRelativePath(candidate.relative_path);
+    const destinationRoot = candidate.destination_root as string;
+    const targetPath = candidate.target_path as string;
+    const relativePath = candidate.relative_path as string;
+    const root = candidate.root as InstallTransactionEntry["root"];
+    const action = candidate.action as TransactionAction;
+    const relativePathAllowed = root === "justinstack"
+      ? isRuntimePath(relativePath)
+      : action === "remove" ? isManifestSkillPath(relativePath) : isSkillPath(relativePath);
+    if (!relativePathAllowed || root === "justinstack" && !samePath(destinationRoot, paths.justinRoot)) {
+      throw new StoryStackError("Install transaction entry is outside the owned-file allowlist", "INVALID_INSTALL_TRANSACTION");
+    }
+    const expectedTarget = path.resolve(nativePath(destinationRoot, relativePath));
+    if (!samePath(expectedTarget, targetPath)) {
+      throw new StoryStackError("Install transaction target is inconsistent", "INVALID_INSTALL_TRANSACTION");
+    }
+    assertTransactionSha(candidate.before_sha256, true, "Install transaction prior hash");
+    assertTransactionMode(candidate.before_mode, true, "Install transaction prior mode");
+    assertTransactionSha(candidate.after_sha256, true, "Install transaction resulting hash");
+    assertTransactionMode(candidate.after_mode, true, "Install transaction resulting mode");
+    if (candidate.backup_path !== null) assertAbsoluteNormalizedPath(candidate.backup_path, "Install transaction backup path");
+    const hasBefore = candidate.before_sha256 !== null && candidate.before_mode !== null && candidate.backup_path !== null;
+    const hasAfter = candidate.after_sha256 !== null && candidate.after_mode !== null;
+    if ((action === "create" && (hasBefore || !hasAfter)) ||
+      (action === "replace" && (!hasBefore || !hasAfter)) ||
+      (action === "remove" && (!hasBefore || hasAfter)) ||
+      (!hasBefore && (candidate.before_sha256 !== null || candidate.before_mode !== null || candidate.backup_path !== null))) {
+      throw new StoryStackError("Install transaction entry metadata is inconsistent", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (action === "replace" && candidate.before_sha256 === candidate.after_sha256 && candidate.before_mode === candidate.after_mode) {
+      throw new StoryStackError("Install transaction replacement has no observable change", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (candidate.backup_path !== null && !isContained(path.join(paths.justinRoot, "backups"), candidate.backup_path)) {
+      throw new StoryStackError("Install transaction backup escapes the backup root", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (root !== "justinstack") {
+      const target = root.slice(0, -"-skills".length) as PlatformTarget;
+      const ownsDestination = parsedManifest.installations.some((installation) =>
+        installation.target === target && installation.destination_root !== null &&
+        samePath(installation.destination_root, destinationRoot));
+      if (!ownsDestination) {
+        throw new StoryStackError("Install transaction skill root is absent from its manifest", "INVALID_INSTALL_TRANSACTION");
+      }
+    }
+    const manifestEntries = manifestEntriesForTransaction(parsedManifest, root, destinationRoot);
+    const desired = manifestEntries.find((entry) => entry.path === relativePath);
+    if ((action === "remove" && desired !== undefined) ||
+      (action !== "remove" && (desired === undefined || desired.sha256 !== candidate.after_sha256))) {
+      throw new StoryStackError("Install transaction entry disagrees with its manifest", "INVALID_INSTALL_TRANSACTION");
+    }
+    if (targetPaths.has(targetPath)) {
+      throw new StoryStackError("Install transaction contains duplicate target paths", "INVALID_INSTALL_TRANSACTION");
+    }
+    targetPaths.add(targetPath);
+    entries.push({
+      root,
+      destination_root: destinationRoot,
+      relative_path: relativePath,
+      target_path: targetPath,
+      action,
+      before_sha256: candidate.before_sha256,
+      before_mode: candidate.before_mode,
+      after_sha256: candidate.after_sha256,
+      after_mode: candidate.after_mode,
+      backup_path: candidate.backup_path,
+      state: candidate.state,
+    });
+  }
+  return {
+    schema_version: 1,
+    transaction_id: record.transaction_id,
+    created_at: record.created_at,
+    pid: record.pid as number,
+    user_home: record.user_home,
+    project_root: record.project_root,
+    justin_root: record.justin_root,
+    plan_fingerprint: record.plan_fingerprint,
+    manifest_path: record.manifest_path,
+    manifest_before_sha256: record.manifest_before_sha256,
+    manifest_before_mode: record.manifest_before_mode,
+    manifest_after_sha256: record.manifest_after_sha256,
+    manifest_after_mode: record.manifest_after_mode,
+    manifest: parsedManifest,
+    entries,
+  };
+}
+
+function serializeInstallTransaction(journal: InstallTransactionJournal): string {
+  return `${JSON.stringify(journal, null, 2)}\n`;
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(directory, "r");
+    await handle.sync();
+  } catch {
+    // Directory fsync is not consistently supported on Windows.
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function removeInstallTransaction(paths: InstallTransactionPaths, expectedSha256: string): Promise<void> {
+  const journalPath = transactionJournalPath(paths.justinRoot);
+  const issue = await inspectParentSafety(safetyRootFor(paths, paths.justinRoot), journalPath);
+  if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
+  const collision = await inspectCollision(journalPath);
+  if (collision === null) return;
+  if (collision.kind !== "file" || collision.sha256 !== expectedSha256) {
+    throw new StoryStackError("Install transaction journal changed during recovery", "INVALID_INSTALL_TRANSACTION");
+  }
+  await unlink(journalPath);
+  await syncDirectory(path.dirname(journalPath));
+}
+
+async function readInstallTransaction(paths: InstallTransactionPaths): Promise<{ journal: InstallTransactionJournal; sha256: string } | null> {
+  const journalPath = transactionJournalPath(paths.justinRoot);
+  const issue = await inspectParentSafety(safetyRootFor(paths, paths.justinRoot), journalPath);
+  if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
+  const stats = await lstatOrNull(journalPath);
+  if (stats === null) return null;
+  if (stats.isSymbolicLink() || !stats.isFile() || stats.size > MAX_TRANSACTION_BYTES) {
+    throw new StoryStackError("Install transaction journal is not a safe regular file", "INVALID_INSTALL_TRANSACTION");
+  }
+  const source = await readFile(journalPath, "utf8");
+  return { journal: parseInstallTransaction(source, paths), sha256: digest(source) };
+}
+
+type TransactionFileState = "before" | "after" | "conflict";
+
+async function transactionEntryState(
+  entry: Pick<InstallTransactionEntry, "target_path" | "destination_root" | "before_sha256" | "before_mode" | "after_sha256" | "after_mode">,
+  roots: Pick<InstallPaths, "userHome" | "projectRoot">,
+): Promise<TransactionFileState> {
+  const issue = await inspectParentSafety(safetyRootFor(roots, entry.destination_root), entry.target_path);
+  if (issue !== null) return "conflict";
+  const collision = await inspectCollision(entry.target_path);
+  if (collision === null) {
+    if (entry.after_sha256 === null) return "after";
+    if (entry.before_sha256 === null) return "before";
+    return "conflict";
+  }
+  if (collision.kind !== "file") return "conflict";
+  if (entry.after_sha256 !== null && collision.sha256 === entry.after_sha256 &&
+    entry.after_mode !== null && modeMatches(collision.mode, entry.after_mode)) return "after";
+  if (entry.before_sha256 !== null && collision.sha256 === entry.before_sha256 &&
+    entry.before_mode !== null && modeMatches(collision.mode, entry.before_mode)) return "before";
+  return "conflict";
+}
+
+async function assertAppliedTransactionTargets(journal: InstallTransactionJournal): Promise<void> {
+  const roots = { userHome: journal.user_home, projectRoot: journal.project_root };
+  for (const entry of journal.entries) {
+    if (entry.state !== "applied" || await transactionEntryState(entry, roots) !== "after") {
+      throw new StoryStackError(
+        `Install target changed before the manifest could be committed: ${entry.target_path}`,
+        "INSTALL_PLAN_STALE",
+      );
+    }
+  }
+}
+
+async function assertTransactionBackups(journal: InstallTransactionJournal): Promise<void> {
+  const roots = { userHome: journal.user_home, projectRoot: journal.project_root };
+  for (const entry of journal.entries) {
+    if (entry.backup_path === null || entry.before_sha256 === null) continue;
+    const issue = await inspectParentSafety(safetyRootFor(roots, journal.justin_root), entry.backup_path);
+    const collision = issue === null ? await inspectCollision(entry.backup_path) : null;
+    if (issue !== null || collision?.kind !== "file" || collision.sha256 !== entry.before_sha256) {
+      throw new StoryStackError(`Install recovery backup is missing or invalid: ${entry.backup_path}`, "INSTALL_RECOVERY_REQUIRED");
+    }
+  }
+}
+
+async function restoreTransactionEntry(
+  journal: InstallTransactionJournal,
+  entry: InstallTransactionEntry,
+): Promise<void> {
+  const roots = { userHome: journal.user_home, projectRoot: journal.project_root };
+  if (await transactionEntryState(entry, roots) !== "after") {
+    throw new StoryStackError(`Install target changed during recovery: ${entry.target_path}`, "INSTALL_RECOVERY_REQUIRED");
+  }
+  if (entry.before_sha256 === null) {
+    await unlink(entry.target_path);
+    await cleanupEmptyParents(entry.target_path, entry.destination_root);
+    return;
+  }
+  if (entry.backup_path === null || entry.before_mode === null) {
+    throw new StoryStackError("Install transaction is missing rollback metadata", "INVALID_INSTALL_TRANSACTION");
+  }
+  const contents = await readFile(entry.backup_path);
+  if (digest(contents) !== entry.before_sha256) {
+    throw new StoryStackError(`Install recovery backup changed: ${entry.backup_path}`, "INSTALL_RECOVERY_REQUIRED");
+  }
+  await writeFileAtomic(entry.target_path, contents, {
+    beforeRename: async (temporaryPath) => {
+      if (process.platform !== "win32") await chmod(temporaryPath, entry.before_mode ?? 0o600);
+      if (await transactionEntryState(entry, roots) !== "after") {
+        throw new StoryStackError(`Install target changed during recovery: ${entry.target_path}`, "INSTALL_RECOVERY_REQUIRED");
+      }
+    },
+  });
+}
+
+async function recoverInstallTransaction(
+  paths: InstallTransactionPaths,
+  options: { testOnlyBeforeManifest?: () => Promise<void> | void } = {},
+): Promise<void> {
+  const loaded = await readInstallTransaction(paths);
+  if (loaded === null) return;
+  const { journal, sha256: journalSha256 } = loaded;
+  await assertTransactionBackups(journal);
+  const roots = { userHome: journal.user_home, projectRoot: journal.project_root };
+  const states: TransactionFileState[] = [];
+  for (const entry of journal.entries) states.push(await transactionEntryState(entry, roots));
+  if (states.includes("conflict")) {
+    throw new StoryStackError("Interrupted install has targets that match neither its before nor after state", "INSTALL_RECOVERY_REQUIRED");
+  }
+  for (const [index, entry] of journal.entries.entries()) {
+    if (entry.state === "pending" && states[index] === "after" && entry.action !== "create") {
+      throw new StoryStackError("Interrupted install contains an ambiguous replacement or removal", "INSTALL_RECOVERY_REQUIRED");
+    }
+  }
+  const manifestState = await transactionEntryState({
+    target_path: journal.manifest_path,
+    destination_root: journal.justin_root,
+    before_sha256: journal.manifest_before_sha256,
+    before_mode: journal.manifest_before_mode,
+    after_sha256: journal.manifest_after_sha256,
+    after_mode: journal.manifest_after_mode,
+  }, roots);
+  const allAfter = journal.entries.every((entry, index) => entry.state === "applied" && states[index] === "after");
+  if (allAfter) {
+    if (manifestState === "conflict") {
+      throw new StoryStackError("Interrupted install manifest changed during recovery", "INSTALL_RECOVERY_REQUIRED");
+    }
+    await options.testOnlyBeforeManifest?.();
+    await assertAppliedTransactionTargets(journal);
+    const currentManifestState = await transactionEntryState({
+      target_path: journal.manifest_path,
+      destination_root: journal.justin_root,
+      before_sha256: journal.manifest_before_sha256,
+      before_mode: journal.manifest_before_mode,
+      after_sha256: journal.manifest_after_sha256,
+      after_mode: journal.manifest_after_mode,
+    }, roots);
+    if (currentManifestState === "before") {
+      const contents = serializeManifest(journal.manifest);
+      await writeFileAtomic(journal.manifest_path, contents, {
+        beforeRename: async (temporaryPath) => {
+          if (process.platform !== "win32") await chmod(temporaryPath, journal.manifest_after_mode);
+          if (await transactionEntryState({
+            target_path: journal.manifest_path,
+            destination_root: journal.justin_root,
+            before_sha256: journal.manifest_before_sha256,
+            before_mode: journal.manifest_before_mode,
+            after_sha256: journal.manifest_after_sha256,
+            after_mode: journal.manifest_after_mode,
+          }, roots) !== "before") {
+            throw new StoryStackError("Interrupted install manifest changed during recovery", "INSTALL_RECOVERY_REQUIRED");
+          }
+        },
+      });
+    } else if (currentManifestState !== "after") {
+      throw new StoryStackError("Interrupted install manifest changed during recovery", "INSTALL_RECOVERY_REQUIRED");
+    }
+    await assertAppliedTransactionTargets(journal);
+    if (await transactionEntryState({
+      target_path: journal.manifest_path,
+      destination_root: journal.justin_root,
+      before_sha256: journal.manifest_before_sha256,
+      before_mode: journal.manifest_before_mode,
+      after_sha256: journal.manifest_after_sha256,
+      after_mode: journal.manifest_after_mode,
+    }, roots) !== "after") {
+      throw new StoryStackError("Recovered install manifest did not remain current", "INSTALL_RECOVERY_REQUIRED");
+    }
+    await removeInstallTransaction(paths, journalSha256);
+    return;
+  }
+  if (manifestState !== "before") {
+    throw new StoryStackError("Interrupted install committed an inconsistent manifest", "INSTALL_RECOVERY_REQUIRED");
+  }
+  for (let index = journal.entries.length - 1; index >= 0; index -= 1) {
+    if (journal.entries[index]?.state === "applied" && states[index] === "after") {
+      const entry = journal.entries[index];
+      if (entry !== undefined) await restoreTransactionEntry(journal, entry);
+    }
+  }
+  await removeInstallTransaction(paths, journalSha256);
+}
+
+class SimulatedAbruptInstallTermination extends Error {
+  constructor() {
+    super("Simulated abrupt installer termination");
+    this.name = "SimulatedAbruptInstallTermination";
+  }
+}
+
+async function createInstallTransaction(
+  plan: InstallPlan,
+  changing: readonly InstallPlanEntry[],
+  backups: readonly BackupRecord[],
+): Promise<{ path: string; sha256: string; journal: InstallTransactionJournal }> {
+  const manifestEntry = plan.entries.find((entry) => entry.kind === "manifest");
+  if (manifestEntry === undefined) {
+    throw new StoryStackError("Install plan has no manifest entry", "INSTALL_INTERNAL_ERROR");
+  }
+  const backupByTarget = new Map(backups.map((backup) => [backup.entry.targetPath, backup]));
+  const entries: InstallTransactionEntry[] = changing
+    .filter((entry) => entry.kind !== "manifest")
+    .map((entry) => {
+      if (entry.root === "story-stack") {
+        throw new StoryStackError("Install plan contains a legacy target root", "INSTALL_INTERNAL_ERROR");
+      }
+      const backup = backupByTarget.get(entry.targetPath);
+      if (entry.previousSha256 !== null && backup === undefined) {
+        throw new StoryStackError(`Install transaction has no backup for ${entry.targetPath}`, "INSTALL_INTERNAL_ERROR");
+      }
+      return {
+        root: entry.root,
+        destination_root: entry.destinationRoot,
+        relative_path: entry.relativePath,
+        target_path: entry.targetPath,
+        action: entry.action as TransactionAction,
+        before_sha256: entry.previousSha256,
+        before_mode: backup?.mode ?? null,
+        after_sha256: entry.action === "remove" ? null : entry.sha256,
+        after_mode: entry.action === "remove" ? null : entry.mode,
+        backup_path: backup?.persistentPath ?? null,
+        state: "pending",
+      };
+    });
+  const journal: InstallTransactionJournal = {
+    schema_version: 1,
+    transaction_id: randomUUID(),
+    created_at: new Date().toISOString(),
+    pid: process.pid,
+    user_home: plan.userHome,
+    project_root: plan.projectRoot,
+    justin_root: plan.justinRoot,
+    plan_fingerprint: plan.fingerprint,
+    manifest_path: plan.manifestPath,
+    manifest_before_sha256: manifestEntry.previousSha256,
+    manifest_before_mode: manifestEntry.previousMode,
+    manifest_after_sha256: manifestEntry.sha256,
+    manifest_after_mode: manifestEntry.mode,
+    manifest: plan.manifest,
+    entries,
+  };
+  const contents = serializeInstallTransaction(journal);
+  if (Buffer.byteLength(contents, "utf8") > MAX_TRANSACTION_BYTES) {
+    throw new StoryStackError("Install transaction journal exceeds the safe size limit", "INSTALL_INTERNAL_ERROR");
+  }
+  const journalPath = transactionJournalPath(plan.justinRoot);
+  const safetyRoot = safetyRootFor(plan, plan.justinRoot);
+  const issue = await inspectParentSafety(safetyRoot, journalPath);
+  if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
+  if (await inspectCollision(journalPath) !== null) {
+    throw new StoryStackError("An install transaction journal already exists", "INSTALL_RECOVERY_REQUIRED");
+  }
+  await writeFileAtomic(journalPath, contents, {
+    beforeRename: async (temporaryPath) => {
+      if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+      const currentIssue = await inspectParentSafety(safetyRoot, journalPath);
+      if (currentIssue !== null) throw new StoryStackError(currentIssue, "UNSAFE_INSTALL_DESTINATION");
+      if (await inspectCollision(journalPath) !== null) {
+        throw new StoryStackError("An install transaction journal appeared during preflight", "INSTALL_RECOVERY_REQUIRED");
+      }
+    },
+  });
+  return { path: journalPath, sha256: digest(contents), journal };
+}
+
+async function markTransactionEntryApplied(
+  transaction: { path: string; sha256: string; journal: InstallTransactionJournal },
+  entryIndex: number,
+): Promise<void> {
+  const existing = transaction.journal.entries[entryIndex];
+  if (existing === undefined || existing.state !== "pending") {
+    throw new StoryStackError("Install transaction progress is inconsistent", "INSTALL_INTERNAL_ERROR");
+  }
+  const next: InstallTransactionJournal = {
+    ...transaction.journal,
+    entries: transaction.journal.entries.map((entry, index) =>
+      index === entryIndex ? { ...entry, state: "applied" } : { ...entry }),
+  };
+  const contents = serializeInstallTransaction(next);
+  const roots = { userHome: next.user_home, projectRoot: next.project_root };
+  const safetyRoot = safetyRootFor(roots, next.justin_root);
+  const issue = await inspectParentSafety(safetyRoot, transaction.path);
+  if (issue !== null) throw new StoryStackError(issue, "INVALID_INSTALL_TRANSACTION");
+  await writeFileAtomic(transaction.path, contents, {
+    beforeRename: async (temporaryPath) => {
+      if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+      const collision = await inspectCollision(transaction.path);
+      if (collision?.kind !== "file" || collision.sha256 !== transaction.sha256) {
+        throw new StoryStackError("Install transaction journal changed while recording progress", "INSTALL_RECOVERY_REQUIRED");
+      }
+    },
+  });
+  transaction.journal = next;
+  transaction.sha256 = digest(contents);
 }
 
 async function cleanupEmptyParents(targetPath: string, boundary: string): Promise<void> {
@@ -1475,8 +2581,11 @@ async function rollbackInstall(written: readonly InstallPlanEntry[], backups: re
       }
       const backup = byTarget.get(entry.targetPath);
       if (backup !== undefined) {
-        await writeFileAtomic(entry.targetPath, backup.contents);
-        if (process.platform !== "win32") await chmod(entry.targetPath, backup.mode);
+        await writeFileAtomic(entry.targetPath, backup.contents, {
+          beforeRename: async (temporaryPath) => {
+            if (process.platform !== "win32") await chmod(temporaryPath, backup.mode);
+          },
+        });
       } else if (current !== null) {
         await unlink(entry.targetPath);
         await cleanupEmptyParents(entry.targetPath, entry.destinationRoot);
@@ -1492,6 +2601,14 @@ async function applyInstallUnlocked(
   input: InstallPlan | InstallerOptions = {},
   applyOptions: ApplyInstallOptions = {},
 ): Promise<InstallResult> {
+  if (applyOptions.testOnlyAbortAfterMutations !== undefined &&
+    (!Number.isSafeInteger(applyOptions.testOnlyAbortAfterMutations) || applyOptions.testOnlyAbortAfterMutations <= 0)) {
+    throw new StoryStackError("Test failure injection must be a positive integer", "INVALID_ARGUMENTS");
+  }
+  if (applyOptions.testOnlyAbortBeforeMutation !== undefined &&
+    (!Number.isSafeInteger(applyOptions.testOnlyAbortBeforeMutation) || applyOptions.testOnlyAbortBeforeMutation <= 0)) {
+    throw new StoryStackError("Test failure injection must be a positive integer", "INVALID_ARGUMENTS");
+  }
   const supplied = isInstallPlan(input) ? input : null;
   const fresh = await planInstall(supplied?.normalizedOptions ?? input);
   if (supplied !== null && supplied.fingerprint !== fresh.fingerprint) {
@@ -1562,19 +2679,33 @@ async function applyInstallUnlocked(
     await assertBackupMatchesPlan();
     if (operation.action === "create") {
       await writeFileAtomic(operation.targetPath, contents, {
-        beforeRename: async () => {
+        beforeRename: async (temporaryPath) => {
+          if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
           const issue = await inspectParentSafety(safetyRootFor(fresh, fresh.justinRoot), operation.targetPath);
           if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
           await assertTargetMatchesPlan(entry);
           await assertBackupMatchesPlan();
         },
       });
-      if (process.platform !== "win32") await chmod(operation.targetPath, 0o600);
     }
     backups.push({ entry, contents, mode: stats.mode & 0o777, persistentPath: operation.targetPath });
   }
 
   const writtenEntries: InstallPlanEntry[] = [];
+  const transaction = changing.length === 0 ? null : await createInstallTransaction(fresh, changing, backups);
+  let mutationCount = 0;
+  const beginMutation = (): void => {
+    mutationCount += 1;
+    if (mutationCount === applyOptions.testOnlyAbortBeforeMutation) throw new SimulatedAbruptInstallTermination();
+  };
+  const finishMutation = async (entry: InstallPlanEntry): Promise<void> => {
+    if (transaction !== null && entry.kind !== "manifest") {
+      const entryIndex = transaction.journal.entries.findIndex((candidate) => candidate.target_path === entry.targetPath);
+      if (entryIndex < 0) throw new StoryStackError("Install transaction lost a target entry", "INSTALL_INTERNAL_ERROR");
+      await markTransactionEntryApplied(transaction, entryIndex);
+    }
+    if (mutationCount === applyOptions.testOnlyAbortAfterMutations) throw new SimulatedAbruptInstallTermination();
+  };
   try {
     const ordered = [
       ...changing.filter((entry) => entry.kind !== "manifest" && entry.action !== "remove"),
@@ -1582,6 +2713,11 @@ async function applyInstallUnlocked(
       ...changing.filter((entry) => entry.kind === "manifest"),
     ];
     for (const entry of ordered) {
+      if (entry.kind === "manifest" && transaction !== null) {
+        await applyOptions.testOnlyBeforeManifest?.();
+        await assertAppliedTransactionTargets(transaction.journal);
+      }
+      beginMutation();
       if (entry.action === "remove") {
         const issue = await inspectParentSafety(entry.safetyRoot, entry.targetPath);
         if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
@@ -1589,21 +2725,35 @@ async function applyInstallUnlocked(
         await unlink(entry.targetPath);
         writtenEntries.push(entry);
         await cleanupEmptyParents(entry.targetPath, entry.destinationRoot);
+        await finishMutation(entry);
         continue;
       }
       const contents = prepared.get(entry.targetPath);
       if (contents === undefined) throw new StoryStackError("Installer lost prepared contents", "INSTALL_INTERNAL_ERROR");
       await writeFileAtomic(entry.targetPath, contents, {
-        beforeRename: async () => {
+        beforeRename: async (temporaryPath) => {
+          if (process.platform !== "win32") await chmod(temporaryPath, entry.mode);
           const issue = await inspectParentSafety(entry.safetyRoot, entry.targetPath);
           if (issue !== null) throw new StoryStackError(issue, "UNSAFE_INSTALL_DESTINATION");
           await assertTargetMatchesPlan(entry);
         },
       });
       writtenEntries.push(entry);
-      if (process.platform !== "win32") await chmod(entry.targetPath, entry.mode);
+      await finishMutation(entry);
+    }
+    if (transaction !== null) {
+      await assertAppliedTransactionTargets(transaction.journal);
+      const manifest = writtenEntries.find((entry) => entry.kind === "manifest");
+      const manifestState = manifest === undefined ? null : await inspectCollision(manifest.targetPath);
+      if (
+        manifest === undefined || manifestState?.kind !== "file" || manifestState.sha256 !== manifest.sha256 ||
+        !modeMatches(manifestState.mode, manifest.mode)
+      ) {
+        throw new StoryStackError("Installed manifest changed before transaction completion", "INSTALL_PLAN_STALE");
+      }
     }
   } catch (error) {
+    if (error instanceof SimulatedAbruptInstallTermination) throw error;
     const failures = await rollbackInstall(writtenEntries, backups);
     if (failures.length > 0) {
       throw new StoryStackError(
@@ -1611,8 +2761,12 @@ async function applyInstallUnlocked(
         "INSTALL_ROLLBACK_FAILED",
       );
     }
+    if (transaction !== null) {
+      await removeInstallTransaction(fresh, transaction.sha256);
+    }
     throw error;
   }
+  if (transaction !== null) await removeInstallTransaction(fresh, transaction.sha256);
   const written = writtenEntries.filter((entry) => entry.action !== "remove").map((entry) => entry.targetPath);
   const removed = writtenEntries.filter((entry) => entry.action === "remove").map((entry) => entry.targetPath);
   return {
@@ -1645,8 +2799,16 @@ export async function applyInstall(
     target: normalized.target,
     scope: normalized.scope,
     skillRoots: normalized.skillRoots,
+    ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+    ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
   });
-  return withInstallerLock(paths, async () => applyInstallUnlocked(input, applyOptions));
+  return withInstallerLock(
+    paths,
+    async () => applyInstallUnlocked(input, applyOptions),
+    { ...(applyOptions.testOnlyBeforeRecoveryManifest === undefined
+      ? {}
+      : { testOnlyBeforeManifest: applyOptions.testOnlyBeforeRecoveryManifest }) },
+  );
 }
 
 export function formatInstallPlan(plan: InstallPlan): string {
@@ -1689,16 +2851,53 @@ export function formatInstallPlan(plan: InstallPlan): string {
   return `${lines.join("\n")}\n`;
 }
 
-async function canonicalSkillFiles(packageRoot: string): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
+interface ExpectedInstallFile {
+  sha256: string;
+  mode: number;
+}
+
+async function canonicalSkillFiles(packageRoot: string): Promise<Map<string, ExpectedInstallFile>> {
+  const result = new Map<string, ExpectedInstallFile>();
   for (const skill of INSTALLED_SKILLS) {
     const root = path.join(packageRoot, "skills", skill);
-    for (const sourcePath of await listRegularFiles(root, true)) {
+    for (const sourcePath of await skillPackageFiles(packageRoot, skill)) {
       const relative = `${skill}/${normalizeRelativePath(path.relative(root, sourcePath))}`;
-      result.set(relative, await digestFile(sourcePath));
+      result.set(relative, { sha256: await digestFile(sourcePath), mode: await portableSourceMode(sourcePath) });
     }
   }
   return result;
+}
+
+function addUnique(values: string[], value: string): void {
+  if (!values.includes(value)) values.push(value);
+}
+
+async function inspectDoctorFile(
+  targetPath: string,
+  destinationRoot: string,
+  safetyRoot: string,
+  expected: ExpectedInstallFile,
+): Promise<"installed" | "missing" | "stale"> {
+  assertContained(destinationRoot, targetPath, "Doctor target");
+  const issue = await inspectParentSafety(safetyRoot, targetPath);
+  if (issue !== null) return "stale";
+  const collision = await inspectCollision(targetPath);
+  if (collision === null) return "missing";
+  if (collision.kind !== "file" || collision.sha256 !== expected.sha256 || !modeMatches(collision.mode, expected.mode)) {
+    return "stale";
+  }
+  return "installed";
+}
+
+function proposalSafetyRoot(
+  target: PlatformTarget,
+  normalized: NormalizedInstallerOptions,
+  paths: InstallPaths,
+): string {
+  if (normalized.scope === "project") return paths.projectRoot;
+  if (target === "claude" && normalized.claudeConfigDir !== undefined) return normalized.claudeConfigDir;
+  if (target === "codex" && normalized.codexHome !== undefined) return normalized.codexHome;
+  return paths.userHome;
 }
 
 export async function inspectPlatformInstallations(options: InstallerOptions = {}): Promise<PlatformDoctorStatus[]> {
@@ -1709,6 +2908,8 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
     target: normalized.target,
     scope: normalized.scope,
     skillRoots: normalized.skillRoots,
+    ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+    ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
   });
   const canonical = await canonicalSkillFiles(normalized.packageRoot);
   let installedManifest: InstallManifestV2 | null = null;
@@ -1716,18 +2917,28 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
   try {
     const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.justinRoot));
     installedManifest = loaded?.manifest.schema_version === 2 ? loaded.manifest : null;
-    manifestProblem = loaded !== null && loaded.manifest.schema_version !== 2;
+    const manifestStats = loaded === null ? null : await lstat(paths.manifestPath);
+    manifestProblem = loaded !== null && (
+      loaded.manifest.schema_version !== 2 || !modeMatches(manifestStats?.mode ?? null, 0o600) ||
+      loaded.manifest.package_version !== normalized.packageVersion
+    );
   } catch {
     manifestProblem = true;
   }
-  const currentRuntimePaths = new Set(
-    (await runtimeDescriptors(
-      normalized.packageRoot,
-      paths.justinRoot,
-      safetyRootFor(paths, paths.justinRoot),
-      normalized.packageVersion,
-    )).map((entry) => entry.relativePath),
-  );
+  const runtimeExpected = new Map<string, ExpectedInstallFile>();
+  for (const descriptor of await runtimeDescriptors(
+    normalized.packageRoot,
+    paths.justinRoot,
+    safetyRootFor(paths, paths.justinRoot),
+    normalized.packageVersion,
+  )) {
+    runtimeExpected.set(descriptor.relativePath, {
+      sha256: digest(await descriptorContents(descriptor)),
+      mode: descriptor.mode,
+    });
+  }
+  const currentRuntimePaths = new Set(runtimeExpected.keys());
+  const runtimeOwnership = new Map((installedManifest?.runtime_entries ?? []).map((entry) => [entry.path, entry.sha256]));
   const obsoleteRuntime = (installedManifest?.runtime_entries ?? [])
     .filter((entry) => !currentRuntimePaths.has(entry.path))
     .map((entry) => path.resolve(nativePath(paths.justinRoot, entry.path)));
@@ -1739,7 +2950,9 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
     const record = installedManifest?.installations.find((candidate) => candidate.key === key);
     const recordedRoot = record?.destination_root;
     const scopeBoundary = normalized.scope === "global" ? paths.userHome : paths.projectRoot;
-    const recordedRootIsSafe = recordedRoot !== null && recordedRoot !== undefined && isContained(scopeBoundary, recordedRoot);
+    const claudeBoundary = target === "claude" && normalized.scope === "global" ? normalized.claudeConfigDir ?? null : null;
+    const recordedRootIsSafe = recordedRoot !== null && recordedRoot !== undefined &&
+      (isContained(scopeBoundary, recordedRoot) || claudeBoundary !== null && isContained(claudeBoundary, recordedRoot));
     const skillsRoot = recordedRootIsSafe ? recordedRoot : configuredRoot;
     const installed: string[] = [];
     const missing: string[] = [];
@@ -1751,29 +2964,39 @@ export async function inspectPlatformInstallations(options: InstallerOptions = {
         .map((entry) => path.resolve(nativePath(skillsRoot, entry.path))),
     ];
     if (record === undefined || !recordedRootIsSafe || manifestProblem) stale.push(paths.manifestPath);
+    const runtimeSafetyRoot = safetyRootFor(paths, paths.justinRoot);
+    for (const [relative, expected] of runtimeExpected) {
+      const targetPath = path.resolve(nativePath(paths.justinRoot, relative));
+      const ownershipMatches = runtimeOwnership.get(relative) === expected.sha256;
+      if (!ownershipMatches) addUnique(stale, paths.manifestPath);
+      const status = await inspectDoctorFile(targetPath, paths.justinRoot, runtimeSafetyRoot, expected);
+      if (status === "missing") addUnique(missing, targetPath);
+      else if (status === "stale" || !ownershipMatches) addUnique(stale, targetPath);
+      else addUnique(installed, targetPath);
+    }
+    const recordOwnership = new Map((record?.entries ?? []).map((entry) => [entry.path, entry.sha256]));
     for (const [relative, expected] of canonical) {
       const targetPath = path.resolve(nativePath(skillsRoot, relative));
-      const parentIssue = await inspectParentSafety(safetyRootFor(paths, skillsRoot), targetPath);
-      if (parentIssue !== null) {
-        stale.push(targetPath);
-        continue;
-      }
-      const stats = await lstatOrNull(targetPath);
-      if (stats === null) missing.push(targetPath);
-      else if (stats.isSymbolicLink() || !stats.isFile() || await digestFile(targetPath) !== expected) stale.push(targetPath);
-      else installed.push(targetPath);
+      const ownershipMatches = recordOwnership.get(relative) === expected.sha256;
+      if (!ownershipMatches) addUnique(stale, paths.manifestPath);
+      const status = await inspectDoctorFile(targetPath, skillsRoot, safetyRootFor(paths, skillsRoot), expected);
+      if (status === "missing") addUnique(missing, targetPath);
+      else if (status === "stale" || !ownershipMatches) addUnique(stale, targetPath);
+      else addUnique(installed, targetPath);
     }
     const context: AdapterPaths = {
       userHome: normalized.userHome,
       projectRoot: normalized.projectRoot,
       justinStackHome: paths.justinRoot,
+      ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+      ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
     };
     const adapter = getPlatformAdapter(target);
     const configurationProposals: ConfigurationProposalView[] = [];
     for (const proposal of adapter.proposals(normalized.scope, context)) {
       configurationProposals.push(await materializeProposal(
         proposal,
-        normalized.scope === "project" ? paths.projectRoot : paths.userHome,
+        proposalSafetyRoot(target, normalized, paths),
       ));
     }
     statuses.push({
@@ -1837,6 +3060,8 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
     target: normalized.target,
     scope: normalized.scope,
     skillRoots: normalized.skillRoots,
+    ...(normalized.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalized.claudeConfigDir }),
+    ...(normalized.codexHome === undefined ? {} : { codexHome: normalized.codexHome }),
   });
   const loaded = await readExistingManifest(paths.manifestPath, safetyRootFor(paths, paths.justinRoot));
   if (loaded === null) {
@@ -1882,7 +3107,12 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
       }
       const skillRoot = record.destination_root;
       const scopeBoundary = record.scope === "global" ? paths.userHome : paths.projectRoot;
-      if (!isContained(scopeBoundary, skillRoot)) {
+      const claudeBoundary = record.target === "claude" && record.scope === "global"
+        ? normalized.claudeConfigDir ?? null
+        : null;
+      const recordedRootIsSafe = isContained(scopeBoundary, skillRoot) ||
+        (claudeBoundary !== null && isContained(claudeBoundary, skillRoot));
+      if (!recordedRootIsSafe) {
         entries.push({
           root: `${record.target}-skills`,
           destinationRoot: skillRoot,
@@ -1900,7 +3130,7 @@ export async function planUninstall(options: InstallerOptions = {}): Promise<Uni
       for (const entry of record.entries) {
         entries.push(await inspectUninstallEntry(
           skillRoot,
-          safetyRootFor(paths, skillRoot),
+          isContained(scopeBoundary, skillRoot) ? scopeBoundary : claudeBoundary ?? skillRoot,
           `${record.target}-skills`,
           entry,
           record.key,
@@ -2073,6 +3303,8 @@ export async function applyUninstall(input: UninstallPlan | InstallerOptions = {
     target: normalizedWithVersion.target,
     scope: normalizedWithVersion.scope,
     skillRoots: normalizedWithVersion.skillRoots,
+    ...(normalizedWithVersion.claudeConfigDir === undefined ? {} : { claudeConfigDir: normalizedWithVersion.claudeConfigDir }),
+    ...(normalizedWithVersion.codexHome === undefined ? {} : { codexHome: normalizedWithVersion.codexHome }),
   });
   return withInstallerLock(paths, async () => applyUninstallUnlocked(input));
 }

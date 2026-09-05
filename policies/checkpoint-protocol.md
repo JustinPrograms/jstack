@@ -38,7 +38,7 @@ The objective is the smallest correct and maintainable change that fits the exis
 
 Keep state local. Do not add telemetry, analytics, cloud persistence, or network synchronization.
 
-The story bundle may contain short paraphrases, safe file paths, commands that were run locally, and compact outcomes. It must not contain:
+The story bundle may contain short paraphrases, only the file paths genuinely needed for recovery, commands that were run locally, and compact outcomes. Automatically captured repository metadata uses a one-way repository identifier and bounded counts; it does not store the absolute repository path or changed filenames. The bundle must not contain:
 
 - secrets, credentials, tokens, or private keys;
 - source-file bodies or large copied diffs;
@@ -52,9 +52,11 @@ Treat filenames as potentially sensitive. Record only the names needed for recov
 
 ## Canonical location and identity
 
-Each story has one canonical bundle:
+Each story has one canonical bundle beneath the resolved JustinStack runtime home:
 
-`~/.justin-stack/workspaces/<workspace-id>/stories/<story-id>/`
+`<resolved-JustinStack-home>/workspaces/<workspace-id>/stories/<story-id>/`
+
+The runtime home is the first non-empty value of `JUSTINSTACK_HOME`, `JUSTIN_STACK_HOME`, or `STORY_STACK_HOME`, otherwise `.justin-stack` beneath the actual user home directory. Refuse a runtime/state root located inside the active repository so a checkpoint cannot be staged or committed accidentally. The default bundle path is `~/.justin-stack/workspaces/<workspace-id>/stories/<story-id>/`.
 
 Use the CLI to sanitize and resolve identifiers; never construct this path by hand. Reject path separators, parent-directory segments, absolute paths, encoded traversal, control characters, reserved device names, and any identifier that resolves outside the state root.
 
@@ -62,21 +64,20 @@ Prefer explicit `--workspace <workspace-id> --story <story-id>` identity argumen
 
 The bundle contains these maintained files:
 
-- `context.md`: the canonical schema-v1 checkpoint with objective, acceptance criteria, non-goals, plan, progress, decisions, checks, feedback, blockers, and approvals.
+- `context.md`: the canonical versioned checkpoint with objective, acceptance criteria, non-goals, plan, progress, decisions, checks, feedback, blockers, and approvals.
 - `decisions.md`: an engine-owned projection of decisions with rationale, assumptions, and required user approvals.
 - `progress.md`: an engine-owned projection of the approved plan, completed and current work, and inspected or changed files.
 - `checks.md`: an engine-owned projection of validation results and addressed or pending review feedback.
 - `handoff.md`: an engine-owned recovery view containing objective, progress, next action, blockers, approvals, and validation.
-- `routing.json`: an optional engine-owned advisory routing record. It is created only by `state upgrade-routing` and changed only by the coordinator through `state routing` commands.
 - `state.json`: engine-owned schema, identity, repository snapshot, status, timestamps, and hashes for the five Markdown files.
 
 `context.md` remains the canonical human-readable current snapshot. The other files are deterministic recovery projections. `state.json` is machine-owned. Do not hand-edit any bundle file; use the CLI so validation, locking, privacy checks, and atomic writes remain in force.
 
 ## CLI invocation
 
-Do not assume installation changed `PATH`. Use a verified `justinstack` launcher when available. Otherwise invoke the portable installed entry with Node.js 20 or newer:
+Do not assume installation changed `PATH`. Use a verified `justinstack` launcher when available. Otherwise resolve the runtime home as described above and invoke the portable installed entry with Node.js 20 or newer:
 
-`node <absolute-home-path>/.justin-stack/bin/justinstack.js <arguments>`
+`node <resolved-JustinStack-home>/bin/justinstack.js <arguments>`
 
 In examples, `justinstack` means that resolved invocation. Do not modify a shell profile, agent settings, hooks, Git configuration, or another global file merely to make the command available.
 
@@ -94,7 +95,7 @@ The repository and current Git state are evidence. Saved state may be stale. Nev
 
 ## Reconciliation
 
-`Current` means the required schema, identity, repository root, branch, HEAD, and worktree fingerprint agree with the current local repository.
+`Current` means the required schema, workspace/story identity, privacy-safe repository identifier derived from the canonical root, branch, HEAD, and worktree fingerprint agree with the current local repository.
 
 `Stale but reconcilable` means the repository and branch still agree and the difference is locally observable without a product decision. Inspect the relevant local diff, correct affected semantic state, and refresh the snapshot. A changed file is not proof that work was completed.
 
@@ -108,37 +109,30 @@ Safe reconciliation may update only facts verifiable from local evidence. Produc
 
 Only the coordinating agent may update the canonical bundle. Delegated workers return observations to the coordinator and must not call state-changing commands or edit bundle files.
 
-Routing remains advisory. A declared slot, work class, host, or model in
-`routing.json` is not proof that a worker was started, a host observed it, a
-model changed, or a provider cost was incurred. Record only short local scope,
-reason, and outcome summaries; never save raw prompts, source bodies, URLs,
-credentials, provider account data, or billing data in routing evidence.
-
 Use the CLI for every write:
 
 - `state init` creates a missing bundle and preserves an existing one.
-- `state update` validates semantic content and replaces changed bundle files atomically under the story lock.
+- `state update` validates semantic content and atomically replaces each changed bundle file under the story lock, with the integrity manifest written last.
+- `state record-validation` never executes a program. After the coordinator observes an external check succeed, it records an explicit attestation only when the supplied pre-check fingerprint still matches under the story lock.
 - `state approve-plan` records a complete, explicitly approved plan and performs the eligible status transition.
 - `state snapshot` refreshes only locally derived repository metadata.
 - `state complete` records completion only after its gates pass.
-- `state upgrade-routing` creates the optional empty advisory record for an existing story.
-- `state routing` assesses or records declared work, attempts, terminal outcomes, and explicit resume reconciliation without controlling any host.
 
-Update after meaningful progress: a plan or decision changes; repository discovery changes scope; code or tests change; a check completes; review feedback changes; a blocker or approval changes; or a long-running action is about to begin and saving the exact recovery point reduces risk.
+Update after meaningful progress: a plan or decision changes; repository discovery changes scope; code or tests change; a check completes; review feedback changes; a blocker or approval changes; or a long-running action is about to begin and saving the recovery point reduces risk. A lifecycle hook may request a save at normal boundaries, but a usage limit or process termination can arrive before any final hook runs.
 
 Avoid a write when no semantic content, status, or repository snapshot changed. Replace stale statements instead of appending chronology. Use `state snapshot` when only Git-derived metadata changed and `state update` when meaning changed.
 
-Preserve the established responsibility of each projection. Keep content concise, distinguish facts from assumptions, and ensure the handoff contains one exact, resumable next action. The engine uses atomic writes, compare-and-swap protection, and one story-level coordinator lock. `state.json` is written last when a logical update spans files so readers can detect an interrupted update.
+Preserve the established responsibility of each projection. Keep content concise, distinguish facts from assumptions, and ensure the handoff contains one exact, resumable next action as of its checkpoint timestamp. The engine uses per-file atomic replacement, compare-and-swap protection, and one story-level coordinator lock. `state.json` is written last when a logical update spans files so readers can detect and reject an interrupted partial update. Only the latest successfully completed bundle write is guaranteed to survive; unsaved reasoning or progress cannot be reconstructed.
 
 ## Validation freshness
 
-Record each check with what ran, its outcome, and enough local scope to understand coverage. Bind successful validation to the current HEAD and worktree fingerprint. After relevant files or configuration change, report the old result as historical and record the necessary rerun as the next action.
+Record each check with what ran, its outcome, and enough local scope to understand coverage. Immediately before running a check through the host agent or terminal, capture the current fingerprint from `state validate --json`. After directly observing success, bind the coordinator's attestation to that fingerprint only through `state record-validation --expected-fingerprint <sha256> --confirm-validation-succeeded`; free-form `state update` text is not validation evidence. The engine does not run the command and the attestation is not cryptographic proof. Editing the validation section or reapproving changed plan content clears prior validation metadata. After relevant files or configuration change, report the old result as historical and record the necessary rerun as the next action.
 
 Never convert a failed, skipped, partial, or interrupted check into a pass. Keep the compact failure and smallest useful follow-up; do not paste verbose logs into the bundle.
 
 ## Status and approval gates
 
-Status summarizes progress; it never grants authority. Change status only through a supported workflow transition. Do not downgrade active or completed work merely because an earlier skill runs again.
+Status summarizes progress; it never grants authority. Change status only through a supported workflow transition. Generic updates cannot change approved plan fields; use the explicitly confirmed `approve-plan` workflow to replace a plan. Completed checkpoints are immutable except for projection repair; begin a new story until a dedicated reopen workflow exists.
 
 Keep required approvals in canonical state until the user explicitly grants or withdraws them. A full update must preserve those gates unless the user explicitly changes one and the CLI's approval safeguard is used. Approval of one decision is not approval of the full plan. A ready plan does not authorize implementation, staging, committing, or any remote action.
 

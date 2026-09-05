@@ -5,7 +5,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SKILLS = ["story", "plan-eng-review", "review", "resume-story"] as const;
+const SKILLS = ["story", "plan-eng-review", "justinstack-review", "resume-story"] as const;
+const OPTIONAL_FRONTMATTER = new Set(["license", "compatibility", "metadata", "allowed-tools"]);
 
 async function walk(directory: string): Promise<string[]> {
   let entries;
@@ -30,12 +31,19 @@ function frontmatter(source: string): { name: string; description: string; body:
   const end = normalized.indexOf("\n---\n", 4);
   assert.notEqual(end, -1);
   const lines = normalized.slice(4, end).split("\n");
-  assert.equal(lines.length, 2);
-  assert.deepEqual(
-    lines.map((line) => line.slice(0, line.indexOf(":"))).sort(),
-    ["description", "name"],
+  const topLevel = lines.filter((line) => line.length > 0 && !/^\s/u.test(line));
+  const values = new Map(
+    topLevel.map((line) => {
+      const delimiter = line.indexOf(":");
+      assert.notEqual(delimiter, -1, `Invalid frontmatter line: ${line}`);
+      return [line.slice(0, delimiter), line.slice(delimiter + 1).trim()];
+    }),
   );
-  const values = new Map(lines.map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 1).trim()]));
+  assert.equal(values.has("name"), true);
+  assert.equal(values.has("description"), true);
+  for (const key of values.keys()) {
+    assert.equal(key === "name" || key === "description" || OPTIONAL_FRONTMATTER.has(key), true, `Unknown field: ${key}`);
+  }
   return {
     name: values.get("name") ?? "",
     description: values.get("description") ?? "",
@@ -68,10 +76,17 @@ function assertNoMutatingExample(example: string, label: string): void {
 }
 
 test("canonical skills have portable frontmatter and no platform-specific source copies", async () => {
-  const skillDirectories = (await readdir(path.join(PACKAGE_ROOT, "skills"), { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
+  const skillDirectories: string[] = [];
+  for (const entry of await readdir(path.join(PACKAGE_ROOT, "skills"), { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    try {
+      await readFile(path.join(PACKAGE_ROOT, "skills", entry.name, "SKILL.md"), "utf8");
+      skillDirectories.push(entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  skillDirectories.sort();
   assert.deepEqual(skillDirectories, [...SKILLS].sort());
 
   for (const skill of SKILLS) {
@@ -79,8 +94,15 @@ test("canonical skills have portable frontmatter and no platform-specific source
     const source = await readFile(path.join(skillRoot, "SKILL.md"), "utf8");
     const parsed = frontmatter(source);
     assert.equal(parsed.name, skill);
+    assert.match(parsed.name, /^(?!-)(?!.*--)[a-z0-9-]{1,64}(?<!-)$/u);
     assert.equal(parsed.description.length >= 20, true);
-    assert.match(parsed.body, /~\/\.justin-stack\/policies\/checkpoint-protocol\.md/u);
+    assert.equal(parsed.description.length <= 1024, true);
+    assert.match(parsed.body, /JUSTINSTACK_HOME/u);
+    assert.match(parsed.body, /JUSTIN_STACK_HOME/u);
+    assert.match(parsed.body, /STORY_STACK_HOME/u);
+    assert.match(parsed.body, /bin\/justinstack\.js/u);
+    assert.match(parsed.body, /do not depend on `PATH`/u);
+    assert.match(parsed.body, /policies\/checkpoint-protocol\.md/u);
     assert.match(parsed.body, /coordinating agent/iu);
     assert.doesNotMatch(source, /\b(?:TODO|FIXME|TBD)\b/u);
     assert.doesNotMatch(source, /(?:\.claude|\.bob|\.codex)[\\/]/iu);
@@ -89,7 +111,8 @@ test("canonical skills have portable frontmatter and no platform-specific source
     const topLevel = await readdir(skillRoot, { withFileTypes: true });
     for (const entry of topLevel) {
       assert.equal(
-        entry.name === "SKILL.md" || (entry.name === "references" && entry.isDirectory()),
+        entry.name === "SKILL.md" ||
+          (["references", "scripts", "assets"].includes(entry.name) && entry.isDirectory()),
         true,
         `Unexpected canonical skill entry: ${skill}/${entry.name}`,
       );
@@ -99,6 +122,49 @@ test("canonical skills have portable frontmatter and no platform-specific source
   const adapterSkillCopies = (await walk(path.join(PACKAGE_ROOT, "adapters")))
     .filter((filePath) => path.basename(filePath).toLowerCase() === "skill.md");
   assert.deepEqual(adapterSkillCopies, []);
+});
+
+test("portable frontmatter accepts every optional Agent Skills field", () => {
+  const parsed = frontmatter(`---
+name: sample-skill
+description: Exercise every standard optional field.
+license: Apache-2.0
+compatibility: Requires Node.js 20.
+metadata:
+  owner: justinstack
+allowed-tools: Read Bash(git:*)
+---
+
+# Sample
+`);
+  assert.equal(parsed.name, "sample-skill");
+  assert.equal(parsed.description, "Exercise every standard optional field.");
+});
+
+test("report-only review leaves checkpoint writes opt-in and recovery discloses abrupt-cutoff limits", async () => {
+  const review = await readFile(path.join(PACKAGE_ROOT, "skills", "justinstack-review", "SKILL.md"), "utf8");
+  assert.match(review, /if and only if the user authorizes local checkpoint writes/iu);
+  assert.match(review, /review-only, read-only, or explicitly says not to write[\s\S]*leave the bundle unchanged/iu);
+
+  const resume = await readFile(path.join(PACKAGE_ROOT, "skills", "resume-story", "SKILL.md"), "utf8");
+  assert.match(resume, /latest successfully persisted checkpoint/iu);
+  assert.match(resume, /abrupt usage-limit cutoff cannot run a final save hook reliably/iu);
+  assert.match(resume, /not necessarily the moment the prior session ended/iu);
+});
+
+test("README documents platform-specific discovery and invocation without continuity overclaims", async () => {
+  const readme = await readFile(path.join(PACKAGE_ROOT, "README.md"), "utf8");
+  assert.match(readme, /<repo>\/\.agents\/skills\//u);
+  assert.match(readme, /~\/\.agents\/skills\//u);
+  assert.doesNotMatch(readme, /\.codex\/skills\//u);
+  assert.match(readme, /CLAUDE_CONFIG_DIR/u);
+  assert.match(readme, /\$justinstack-review/u);
+  assert.match(readme, /In Bob Shell, type `\$` and select the skill from the picker/iu);
+  assert.match(readme, /or use `\/skills`/iu);
+  assert.match(readme, /state commands never launch user-supplied programs/iu);
+  assert.match(readme, /explicit coordinator attestation rather than cryptographic proof/iu);
+  assert.doesNotMatch(readme, /\/list-skills/u);
+  assert.match(readme, /abrupt cutoff[\s\S]*unsaved reasoning or progress is never promised/iu);
 });
 
 test("shared protocol defines the continuity, privacy, coordination, and safety contracts", async () => {
@@ -115,6 +181,10 @@ test("shared protocol defines the continuity, privacy, coordination, and safety 
   assert.match(protocol, /Read-only local Git operations and read-only remote retrieval are allowed/iu);
   assert.match(protocol, /Stop locally.*user perform every remote mutation/isu);
   assert.match(protocol, /must not contain:[\s\S]*secrets[\s\S]*internal URLs[\s\S]*customer information/iu);
+  assert.match(protocol, /one-way repository identifier[\s\S]*does not store the absolute repository path or changed filenames/iu);
+  assert.match(protocol, /Refuse a runtime\/state root located inside the active repository/iu);
+  assert.match(protocol, /usage limit or process termination can arrive before any final hook runs/iu);
+  assert.match(protocol, /Only the latest successfully completed bundle write is guaranteed to survive/iu);
   assert.match(protocol, /state\.json.*written last/isu);
 });
 
@@ -145,6 +215,16 @@ test("canonical skills contain no executable remote or Git mutation examples", a
     const filePath = path.join(PACKAGE_ROOT, "skills", skill, "SKILL.md");
     const source = await readFile(filePath, "utf8");
     for (const example of executableExamples(source)) assertNoMutatingExample(example, skill);
+  }
+});
+
+test("repository agent instructions grant no standing commit or remote-mutation authority", async () => {
+  for (const relativePath of ["AGENTS.md", "CLAUDE.md"]) {
+    const source = await readFile(path.join(PACKAGE_ROOT, relativePath), "utf8");
+    assert.doesNotMatch(source, /owner has authorized[\s\S]*(?:commit|push)/iu);
+    assert.match(source, /(?:Never run `git push`|Never push)/iu);
+    assert.match(source, /explicitly requests[\s\S]*current conversation/iu);
+    for (const example of executableExamples(source)) assertNoMutatingExample(example, relativePath);
   }
 });
 

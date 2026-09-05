@@ -7,7 +7,7 @@ description: Challenge and finalize a JustinStack implementation plan through an
 
 Turn a draft plan into an implementation-ready plan whose material tradeoffs the user has chosen deliberately. Stay in planning mode: inspect local files and update JustinStack state, but do not edit application source, tests, generated artifacts, repository configuration, or Git history.
 
-Before acting, read the shared checkpoint and safety protocol. In an installation it is at `~/.justin-stack/policies/checkpoint-protocol.md`; in this source project it is at `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither copy is available. Platform capabilities never weaken that protocol.
+Before acting, resolve the JustinStack runtime home from the first non-empty value of `JUSTINSTACK_HOME`, `JUSTIN_STACK_HOME`, or `STORY_STACK_HOME`; when none is set, resolve `.justin-stack` beneath the actual user home directory. Do not pass a literal `~` to filesystem APIs. Resolve the CLI as `bin/justinstack.js` beneath that home and invoke it with Node using separate executable and path arguments; do not depend on `PATH` or concatenate a shell command. In this source project only, fall back to `../../dist/src/cli.js` relative to this file when the installed launcher is absent. References below to `justinstack` mean that resolved command. Read `policies/checkpoint-protocol.md` beneath the resolved runtime home. In this source project, the policy fallback is `../../policies/checkpoint-protocol.md` relative to this file. Stop if neither policy copy is available. Platform capabilities never weaken that protocol.
 
 ## Establish the review target
 

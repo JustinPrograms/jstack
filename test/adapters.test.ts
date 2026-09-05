@@ -21,17 +21,26 @@ import { localSafetyHookCommand } from "../adapters/types.js";
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
-const MARKERS: Readonly<Record<PlatformTarget, string>> = {
-  claude: ".claude",
-  bob: ".bob",
-  codex: ".codex",
-};
-
 function paths(): AdapterPaths {
+  const userHome = path.resolve("C:/Users/Sample Person");
   return {
-    userHome: path.resolve("C:/Users/Sample Person"),
+    userHome,
     projectRoot: path.resolve("C:/Workspaces/Example Project With Spaces"),
+    claudeConfigDir: path.resolve("C:/External Config/Claude Home"),
+    codexHome: path.resolve("C:/External Config/Codex Home"),
   };
+}
+
+function expectedSkillRoot(target: PlatformTarget, scope: InstallScope, value: AdapterPaths): string {
+  if (target === "claude") {
+    return scope === "project"
+      ? path.join(value.projectRoot, ".claude", "skills")
+      : path.join(value.claudeConfigDir ?? "", "skills");
+  }
+  if (target === "bob") {
+    return path.join(scope === "project" ? value.projectRoot : value.userHome, ".bob", "skills");
+  }
+  return path.join(scope === "project" ? value.projectRoot : value.userHome, ".agents", "skills");
 }
 
 test("target and scope parsers accept only supported values", () => {
@@ -56,9 +65,11 @@ for (const target of ["claude", "bob", "codex"] as const) {
   for (const scope of ["project", "global"] as const) {
     test(`${target} resolves its exact ${scope} skills root, including paths with spaces`, () => {
       const value = paths();
-      const base = scope === "project" ? value.projectRoot : value.userHome;
-      assert.equal(getPlatformAdapter(target).skillRoot(scope, value), path.join(base, MARKERS[target], "skills"));
-      assert.match(getPlatformAdapter(target).skillRoot(scope, value), /Sample Person|Example Project With Spaces/u);
+      assert.equal(getPlatformAdapter(target).skillRoot(scope, value), expectedSkillRoot(target, scope, value));
+      assert.match(
+        getPlatformAdapter(target).skillRoot(scope, value),
+        /Sample Person|Example Project With Spaces|External Config/u,
+      );
     });
   }
 }
@@ -85,13 +96,17 @@ test("configuration guidance is proposal-only and carries the permanent safety c
 test("Bob and Codex doctor reminders disclose their required verification steps", () => {
   const bob = getPlatformAdapter("bob").doctorReminders("global", paths()).map((item) => item.message).join("\n");
   assert.match(bob, /Advanced mode/u);
-  assert.match(bob, /\/list-skills/u);
+  assert.match(bob, /\/justinstack-review/u);
+  assert.match(bob, /\$justinstack-review/u);
+  assert.match(bob, /\/skills/u);
   assert.match(bob, /not applied/u);
 
   const codex = getPlatformAdapter("codex").doctorReminders("project", paths()).map((item) => item.message).join("\n");
-  assert.match(codex, /requested Codex skill root/u);
-  assert.match(codex, /\.agents\/skills/u);
-  assert.match(codex, /\.codex\/skills/u);
+  assert.match(codex, /\$justinstack-review/u);
+  assert.match(codex, /\.agents[\\/]skills/u);
+  assert.doesNotMatch(codex, /\.codex[\\/]skills/u);
+  assert.match(codex, /outside the sandbox/u);
+  assert.match(codex, /MCP/u);
   assert.match(codex, /not applied/u);
 });
 
@@ -103,7 +118,7 @@ test("platform enforcement proposals use documented local configuration shapes",
   const claudeFragment = JSON.parse(claudeHook.snippet) as {
     hooks?: { PreToolUse?: { matcher?: string; hooks?: { command?: string }[] }[] };
   };
-  assert.equal(claudeFragment.hooks?.PreToolUse?.[0]?.matcher, "Bash|PowerShell");
+  assert.equal(claudeFragment.hooks?.PreToolUse?.[0]?.matcher, "^(Bash|PowerShell)$");
   assert.match(
     claudeFragment.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? "",
     /'safety','hook','--permanent-only'/u,
@@ -113,7 +128,11 @@ test("platform enforcement proposals use documented local configuration shapes",
     .find((item) => item.id === "bob-lifecycle-hooks");
   assert.ok(bobHook);
   assert.equal(bobHook.targetPath, path.join(value.userHome, ".bob", "settings", "settings.json"));
-  assert.doesNotThrow(() => JSON.parse(bobHook.snippet));
+  const bobFragment = JSON.parse(bobHook.snippet) as {
+    hooks?: { PreToolUse?: { matcher?: string; hooks?: { command?: string }[] }[] };
+  };
+  assert.equal(bobFragment.hooks?.PreToolUse?.[0]?.matcher, "^execute_command$");
+  assert.match(bobFragment.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command ?? "", /'safety','hook','--permanent-only'/u);
 
   const codexRules = getPlatformAdapter("codex").proposals("project", value)
     .find((item) => item.id === "codex-rules");
@@ -121,6 +140,27 @@ test("platform enforcement proposals use documented local configuration shapes",
   assert.equal(codexRules.targetPath, path.join(value.projectRoot, ".codex", "rules", "justinstack.rules"));
   assert.match(codexRules.snippet, /decision = "forbidden"/u);
   assert.match(codexRules.snippet, /decision = "prompt"/u);
+  assert.match(codexRules.snippet, /outside the sandbox/u);
+
+  const claudeGlobal = getPlatformAdapter("claude").proposals("global", value);
+  assert.equal(
+    claudeGlobal.find((item) => item.id === "claude-instructions")?.targetPath,
+    path.join(value.claudeConfigDir ?? "", "CLAUDE.md"),
+  );
+  assert.equal(
+    claudeGlobal.find((item) => item.id === "claude-hooks")?.targetPath,
+    path.join(value.claudeConfigDir ?? "", "settings.json"),
+  );
+
+  const codexGlobal = getPlatformAdapter("codex").proposals("global", value);
+  assert.equal(
+    codexGlobal.find((item) => item.id === "codex-instructions")?.targetPath,
+    path.join(value.codexHome ?? "", "AGENTS.md"),
+  );
+  assert.equal(
+    codexGlobal.find((item) => item.id === "codex-rules")?.targetPath,
+    path.join(value.codexHome ?? "", "rules", "justinstack.rules"),
+  );
 });
 
 test("hook commands encode metacharacter-rich install paths instead of shell-quoting them", () => {
@@ -181,6 +221,19 @@ test("hook commands execute through the host shell when the runtime path contain
   }
 });
 
+test("hook bootstrap fails closed when the runtime cannot be imported", async (t) => {
+  const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), "justinstack-missing-hook-runtime-"));
+  t.after(async () => rm(fixtureRoot, { recursive: true, force: true }));
+  const command = localSafetyHookCommand({ userHome: fixtureRoot, projectRoot: fixtureRoot });
+  const match = /^node -e "([^"]+)" ([A-Za-z0-9_-]+)$/u.exec(command);
+  assert.ok(match);
+
+  await assert.rejects(
+    execFileAsync(process.execPath, ["-e", match[1] ?? "", match[2] ?? ""]),
+    (error: unknown) => (error as { code?: number }).code === 2,
+  );
+});
+
 test("Claude and Bob hook proposals retain valid JSON around the encoded command", () => {
   const value = paths();
   const expected = localSafetyHookCommand(value);
@@ -195,10 +248,11 @@ test("Claude and Bob hook proposals retain valid JSON around the encoded command
     hooks: { PreToolUse: { hooks: { command: string }[] }[] };
   };
   const bobJson = JSON.parse(bob.snippet) as {
-    hooks: { PreToolUse: { hooks: { command: string }[] }[] };
+    hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
   };
   assert.equal(claudeJson.hooks.PreToolUse[0]?.hooks[0]?.command, expected);
   assert.equal(bobJson.hooks.PreToolUse[0]?.hooks[0]?.command, expected);
+  assert.equal(bobJson.hooks.PreToolUse[0]?.matcher, "^execute_command$");
 });
 
 test("adapter contexts reject empty and NUL-containing bases", () => {
