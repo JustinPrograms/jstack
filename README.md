@@ -59,7 +59,7 @@ git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git
 On Windows PowerShell:
 
 ```powershell
-git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\\.jstack"; & "$HOME\\.jstack\\setup.ps1" -Host codex -Scope global
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\\.jstack"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" -Host codex -Scope global
 ```
 
 ### Local setup
@@ -75,7 +75,7 @@ sh ~/.jstack/setup --host codex --scope local
 ```
 
 ```powershell
-& "$HOME\\.jstack\\setup.ps1" -Host codex -Scope local
+powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" -Host codex -Scope local
 ```
 
 Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
