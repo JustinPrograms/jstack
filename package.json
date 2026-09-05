@@ -2,24 +2,12 @@
   "name": "justinstack",
   "version": "0.3.0",
   "private": true,
-  "description": "Local-first engineering skills and shared checkpoints for Claude Code, IBM Bob, and OpenAI Codex.",
+  "description": "Portable Markdown skills for planning, implementing, and reviewing software changes with coding agents.",
   "type": "module",
-  "bin": {
-    "justinstack": "./dist/src/cli.js",
-    "story-stack": "./dist/src/cli.js"
-  },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "prebuild": "tsc -b --clean tsconfig.json",
-    "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test --test-reporter=spec dist/test/adapters.test.js dist/test/checkpoint.test.js dist/test/cli-platforms.test.js dist/test/continuity-bundle.test.js dist/test/git.test.js dist/test/identifiers.test.js dist/test/installer.test.js dist/test/installer-multiplatform.test.js dist/test/lifecycle.test.js dist/test/plan-eng-review.test.js dist/test/reconciliation.test.js dist/test/routing.test.js dist/test/safety.test.js dist/test/skills-policy.test.js",
-    "justinstack": "node dist/src/cli.js",
-    "story-stack": "node dist/src/cli.js"
-  },
-  "devDependencies": {
-    "@types/node": "^20.17.0",
-    "typescript": "^5.7.0"
+    "test": "node --test"
   }
 }
