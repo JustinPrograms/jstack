@@ -42,6 +42,40 @@ Copy each complete `skills/<skill-name>/` folder into one of the host's native s
 
 This repository intentionally standardizes Codex on the `.agents/skills` project and personal roots shown above.
 
+### Claude Code
+
+From the JStack repository root, install the three skill folders into the project:
+
+```sh
+mkdir -p .claude/skills
+cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .claude/skills/
+```
+
+Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-implement`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
+
+### OpenAI Codex
+
+From the JStack repository root, install the same folders into Codex's project skill root:
+
+```sh
+mkdir -p .agents/skills
+cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .agents/skills/
+```
+
+Start Codex in the project, open `/skills` to confirm they are available, then invoke `$jstack-plan`, `$jstack-implement`, or `$jstack-review`. To make the skills available in every project, use `~/.agents/skills/` as the destination instead. If a newly added skill does not appear, restart Codex.
+
+On Windows PowerShell, use the equivalent commands below:
+
+```powershell
+# Claude Code
+New-Item -ItemType Directory -Force .claude/skills | Out-Null
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-implement, skills/jstack-review .claude/skills
+
+# OpenAI Codex
+New-Item -ItemType Directory -Force .agents/skills | Out-Null
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-implement, skills/jstack-review .agents/skills
+```
+
 After copying the folders:
 
 - Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-implement`, and `/jstack-review`.
