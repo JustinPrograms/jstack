@@ -29,6 +29,8 @@ Read-only local Git inspection is allowed. Use read-only remote retrieval only w
 
 ## Discover before designing
 
+Start with paths, symbols, error text, and criteria from the task or reconciled handoff. Use focused filename/content search (`rg --files`, `rg`, Git search, or available host tools); return matching paths before reading selected excerpts. Widen to repository inventory only when the execution path remains unclear. Include relevant untracked files and deliberately inspect applicable hidden instructions/configuration; an ignored path or an empty search result is not proof of absence. Treat dependency/generated-directory exclusions as defaults when the task explicitly involves those files.
+
 Trace the actual execution path far enough to plan a correct change:
 
 - locate entry points, callers, state ownership, integration boundaries, error handling, and downstream effects;
@@ -37,6 +39,8 @@ Trace the actual execution path far enough to plan a correct change:
 - identify every current file likely to change and why.
 
 Do not infer architecture from filenames alone. Prefer extending an authoritative implementation over creating a parallel abstraction.
+
+Keep acceptance criteria and applicable instructions intact while bounding excerpts. If search is truncated, files are inaccessible, or a critical relationship is unresolved, narrow or expand the investigation and report remaining coverage gaps. Preserve useful repository-relative paths and symbols in the handoff so implementation can verify them without repeating broad discovery; summaries never replace current source evidence.
 
 ## Challenge the plan
 

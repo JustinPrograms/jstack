@@ -44,6 +44,8 @@ Commands run:
 
 - None.
 
+For each check, record its command, working directory, outcome, coverage, validated inputs/state, and any known limitations. Keep unverified earlier results historical; a matching HEAD or file list alone does not establish freshness.
+
 Still required:
 
 - Determine proportionate validation.

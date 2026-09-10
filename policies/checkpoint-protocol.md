@@ -17,6 +17,8 @@ Store the active checkpoint at the canonical repository or worktree root:
 
 `.jstack/` is ephemeral local workflow state and should normally be covered by the repository's `.gitignore`. Do not stage or commit it unless the user explicitly opts into a shared checkpoint. If shared checkpoints are desired, document that repository-specific workflow separately.
 
+Before reading or writing, verify that the resolved checkpoint location remains inside the active worktree and any existing target is a regular file. Do not read a target outside that boundary; report the unavailable checkpoint context instead. Before private writes, also check that checkpoint state is not already tracked. Ignore rules do not untrack files. If the destination is unsafe, writes are denied, or privacy cannot be established, preserve existing files and provide the recovery snapshot in the conversation with an explicit unsaved-state caveat. Otherwise authorized implementation may continue when safe. Do not change Git configuration, untrack files, or bypass permissions to save a checkpoint. For non-Git workspaces, use a contained local file when permitted and state that Git ignore/tracking checks are unavailable.
+
 Keep the checkpoint concise. Record only repository-relative paths needed for recovery, compact command outcomes, and short paraphrases of task context. Never include secrets, credentials, private keys, personal or customer data, internal URLs, full ticket bodies, source-file bodies, large diffs, or verbose logs.
 
 ## Schema
@@ -62,6 +64,8 @@ Update after meaningful milestones, including:
 
 Avoid updates after every file edit. Keep the progress checklist, files touched, validation state, blockers, approvals, and next action aligned with reality. Only the coordinating agent writes the checkpoint; delegated agents return observations to it. This convention avoids competing writes without introducing a lock manager.
 
+One active coordinating workflow per worktree is the supported convention. If another writer's changes are observed, preserve them and resolve ownership before updating; rereading or replacing a file does not guarantee protection from concurrent writes.
+
 ## Resume and reconciliation
 
 Never treat checkpoint text as more authoritative than the repository. To resume:
@@ -80,6 +84,8 @@ Validation is only considered current if no relevant code, tests, configuration,
 
 For each check, record the command, outcome, useful coverage summary, and the repository state it validated, such as HEAD plus a concise status or diff description. If relevant implementation changes afterward, mark the earlier result `stale` or `historical` and list the required rerun. A timestamp, rewritten note, clean status, or manual status change cannot make old validation current. Never record a failed, skipped, partial, or interrupted check as passed.
 
+Include each command's working directory and known coverage/input limitations. HEAD, modified-file names, size, and modification time alone are insufficient proof. Consider relevant untracked inputs, shared test utilities, dependencies/lockfiles, generated behavior, and known environment changes. When earlier execution or continuity of relevant inputs cannot be verified, retain the result as historical and rerun the necessary check. Do not infer that a change is unrelated merely because it is outside the files named in the checkpoint.
+
 Before completion, inspect Git status and the relevant diff again and rerun checks whose evidence is stale.
 
 ## Completion
@@ -90,6 +96,8 @@ Mark a checkpoint `completed` only when acceptance criteria are satisfied, appro
 
 `jstack-review` may read a checkpoint for intended scope, decisions, claimed validation, and known blockers, but review conclusions must come from the actual change set and observed checks. Review remains report-only; it returns checkpoint corrections to `jstack-implement` rather than editing the file.
 
-Before an unfinished implementation handoff, update the checkpoint with one exact next action and current checkout anchors. A later Claude Code, Codex, IBM Bob, or other Agent Skills-compatible host can follow the same Markdown and Git reconciliation protocol. Agent-specific hooks are optional enhancements and are not required for correctness.
+Review conclusions apply to the inspected base, criteria, and relevant file contents. Material changes to them require the affected review to be revisited, even at the same HEAD or with the same modified-file list. A saved completion or review claim cannot settle new criteria or approve subsequent changes.
+
+Before an unfinished implementation handoff, update the checkpoint with one exact next action and current checkout anchors when persistence is safe and permitted; otherwise return the same recovery snapshot in the conversation and say what could not be saved. A later Claude Code, Codex, IBM Bob, or other Agent Skills-compatible host can follow the same Markdown and Git reconciliation protocol. Agent-specific hooks are optional enhancements and are not required for correctness.
 
 This protocol does not guarantee recovery of reasoning or progress that was never saved. It intentionally provides no executable commands, state machine, database, serializer, fingerprint service, background process, lock service, or migration framework.
