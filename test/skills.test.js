@@ -161,6 +161,7 @@ test("documentation uses native host discovery paths", async () => {
   assert.match(readme, /Install JStack globally for this host/u);
   assert.match(readme, /Install JStack locally for this project/u);
   assert.match(readme, /github\.com\/JustinPrograms\/jstack\.git/u);
+  assert.match(readme, /ExecutionPolicy Bypass/u);
   assert.doesNotMatch(readme, /\.codex[\\/]skills/iu);
   assert.equal("bin" in packageJson, false);
   assert.deepEqual(packageJson.scripts, { test: "node --test" });
