@@ -54,6 +54,17 @@ Test the proposed approach against:
 
 When a material choice remains, present one decision at a time with evidence, impact, a recommendation, and two or three meaningful options. Do not manufacture alternatives around a requirement the user already fixed.
 
+## Run the plan critic
+
+After discovery and the initial challenge, draft a candidate plan but do not present it as `ready` yet. Run `jstack-plan-critic` as an internal gate with the original task or story, acceptance criteria, candidate plan, decisions, and the repository findings needed to evaluate it.
+
+- When the host supports independent skill delegation or subagents, have a fresh critic context run the installed `jstack-plan-critic` skill. Do not tell it which decision to reach.
+- When the host cannot delegate or invoke a sibling skill, perform a distinct critic pass in the current context covering story coverage, repository fit, scope, correctness risks, implementation precision, and testing, then apply the same `APPROVE` or `REVISE` decision contract. This fallback keeps the workflow portable; do not skip the gate.
+- On `REVISE`, apply only the substantive corrections, then run the critic again. Do not involve the user for issues the story or repository evidence can resolve.
+- Stop when the critic returns `APPROVE`, or when a genuinely unresolved product decision requires user input. In the latter case, mark the plan `blocked` and ask for the smallest decision needed instead of looping or guessing.
+
+The critic reports findings but does not revise the plan or invoke this skill recursively. This planning workflow owns every revision and must not deliver an unapproved candidate as implementation-ready.
+
 ## Deliver the plan
 
 Return a concise plan with:
@@ -67,7 +78,7 @@ Return a concise plan with:
 - decisions, assumptions, blockers, and deferred work; and
 - the exact first action for `jstack-implement`.
 
-Use a small diagram only when relationships or state transitions would otherwise be hard to follow. Mark the plan `ready` only when no material question remains. A ready plan does not authorize implementation, staging, committing, or remote work.
+Use a small diagram only when relationships or state transitions would otherwise be hard to follow. Mark the plan `ready` only when no material question remains and the critic has returned `APPROVE`. A ready plan does not authorize implementation, staging, committing, or remote work.
 
 Planning does not create or update `.jstack/checkpoint.md`. Make the plan handoff easy for `jstack-implement` to use as the initial checkpoint: include the task, objective, criteria, ordered progress checklist, decisions, relevant paths, blockers, required approvals, and exact first action without duplicating unnecessary discovery detail.
 

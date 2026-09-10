@@ -8,8 +8,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedSkills = [
   "jstack-implement",
   "jstack-plan",
+  "jstack-plan-critic",
   "jstack-review",
 ];
+const handoffSkills = ["jstack-implement", "jstack-plan", "jstack-review"];
 
 async function pathExists(relativePath) {
   try {
@@ -53,7 +55,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly three canonical Markdown skills", async () => {
+test("ships exactly four canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -134,6 +136,10 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
     assert.match(source, /Never stage or commit unless/u, `${name} must protect Git history`);
     assert.match(source, /Never mutate a ticket system/u, `${name} must forbid remote mutations`);
     assert.match(source, /Follow system and host instructions/u, `${name} must honor host instructions`);
+  }
+
+  for (const name of handoffSkills) {
+    const source = skills[name];
     assert.match(source, /canonical repository or worktree root/u, `${name} must anchor handoffs`);
     assert.match(source, /current branch or detached state/u, `${name} must record branch state`);
     assert.match(source, /explicitly mark any non-Git workspace/u, `${name} must support non-Git work`);
@@ -147,6 +153,39 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
   assert.match(skills["jstack-review"], /Report findings only/u);
   assert.match(skills["jstack-review"], /committed branch changes from the chosen merge base/u);
   assert.match(skills["jstack-review"], /no reliable base exists/u);
+  assert.match(skills["jstack-plan-critic"], /Keep this workflow read-only and report-only/u);
+  assert.match(skills["jstack-plan-critic"], /Do not implement code/u);
+  assert.match(skills["jstack-plan-critic"], /Do not silently modify the plan/u);
+});
+
+test("plan requires an approved plan-critic pass before implementation handoff", async () => {
+  const [plan, critic] = await Promise.all([
+    readFile(path.join(root, "skills/jstack-plan/SKILL.md"), "utf8"),
+    readFile(path.join(root, "skills/jstack-plan-critic/SKILL.md"), "utf8"),
+  ]);
+
+  assert.match(plan, /candidate plan[\s\S]*`jstack-plan-critic`/u);
+  assert.match(plan, /On `REVISE`[\s\S]*run the critic again/u);
+  assert.match(plan, /Stop when the critic returns `APPROVE`[\s\S]*genuinely unresolved product decision/u);
+  assert.match(plan, /must not deliver an unapproved candidate as implementation-ready/u);
+
+  for (const [number, heading] of [
+    [1, "Story coverage"],
+    [2, "Repository fit"],
+    [3, "Scope"],
+    [4, "Correctness risks"],
+    [5, "Implementation precision"],
+    [6, "Testing"],
+  ]) {
+    assert.match(critic, new RegExp(`^### ${number}\\. ${heading}$`, "mu"));
+  }
+
+  assert.match(critic, /Return exactly one of these decisions/u);
+  assert.match(critic, /On `REVISE`[\s\S]*required output format[\s\S]*required corrections under \*\*Findings\*\*/u);
+  assert.match(critic, /\*\*Decision:\*\* APPROVE \| REVISE/u);
+  assert.match(critic, /^\*\*Findings\*\*$/mu);
+  assert.match(critic, /^\*\*Residual risks\*\*$/mu);
+  assert.match(critic, /Omit this section when there are none/u);
 });
 
 test("documentation uses native host discovery paths", async () => {
@@ -161,6 +200,7 @@ test("documentation uses native host discovery paths", async () => {
   assert.match(readme, /Install JStack globally for this host/u);
   assert.match(readme, /Install JStack locally for this project/u);
   assert.match(readme, /github\.com\/JustinPrograms\/jstack\.git/u);
+  assert.match(readme, /`jstack-plan-critic`/u);
   assert.match(readme, /ExecutionPolicy Bypass/u);
   assert.doesNotMatch(readme, /\.codex[\\/]skills/iu);
   assert.equal("bin" in packageJson, false);
@@ -175,10 +215,16 @@ test("optional setup copiers install only the canonical skills into host roots",
     readFile(path.join(root, "setup.ps1"), "utf8"),
   ]);
 
+  assert.match(
+    shellSetup,
+    /for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do/u,
+  );
+  assert.match(
+    powerShellSetup,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review"\)/u,
+  );
+
   for (const source of [shellSetup, powerShellSetup]) {
-    assert.match(source, /jstack-plan/u);
-    assert.match(source, /jstack-implement/u);
-    assert.match(source, /jstack-review/u);
     assert.match(source, /\.claude[\\/]skills/u);
     assert.match(source, /\.agents[\\/]skills/u);
     assert.match(source, /\.bob[\\/]skills/u);

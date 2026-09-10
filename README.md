@@ -1,6 +1,6 @@
 # JStack
 
-JStack is a small collection of portable Markdown skills for planning, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JStack supplies the workflow instructions.
+JStack is a small collection of portable Markdown skills for planning, critiquing plans, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JStack supplies the workflow instructions.
 
 JStack does not ship a task runtime, command parser, background service, checkpoint engine, or terminal interface. Its only executable code is a tiny optional setup copier; using the skills does not require Node.js or a package installation.
 
@@ -11,6 +11,7 @@ The workflow is an original implementation inspired by gstack's public product s
 | Skill | Purpose | Default effect |
 | --- | --- | --- |
 | `jstack-plan` | Inspect a task and repository, challenge scope, and produce an implementation-ready plan. | Read-only |
+| `jstack-plan-critic` | Challenge a candidate plan and return approval or focused required revisions. | Report-only |
 | `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
 | `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
 
@@ -21,6 +22,8 @@ Each skill is a complete Agent Skills directory with portable `name` and `descri
 ```text
 skills/
   jstack-plan/
+    SKILL.md
+  jstack-plan-critic/
     SKILL.md
   jstack-implement/
     SKILL.md
@@ -37,7 +40,7 @@ Like gstack, the easiest route is to paste an instruction into your coding agent
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
 
-The setup copier places only the three Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+The setup copier places only the four Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
 
 ### Global setup
 
@@ -94,37 +97,37 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 ### Project paths
 
-From the JStack repository root, install the three skill folders into the project:
+From the JStack repository root, install the four skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-review .claude/skills/
 ```
 
-Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-implement`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
+Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
 
 For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-implement skills/jstack-review .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-review .agents/skills/
 ```
 
-Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-implement`, or `$jstack-review`.
+Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, or `$jstack-review`.
 
 On Windows PowerShell, use the equivalent commands below:
 
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-implement, skills/jstack-review .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-review .agents/skills
 ```
 
 After copying the folders:
 
-- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-implement`, and `/jstack-review`.
+- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, and `/jstack-review`.
 - Bob Shell can select them through `/skills`.
-- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-implement`, and `$jstack-review`.
+- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, and `$jstack-review`.
 
 The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 
@@ -132,11 +135,12 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 
 ## Workflow
 
-1. Invoke `jstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and returns a ready or blocked plan.
-2. Invoke `jstack-implement` with the ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored `.jstack/checkpoint.md` recovery snapshot while making the authorized local changes and running proportionate checks.
-3. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
+1. Invoke `jstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and drafts a candidate plan.
+2. `jstack-plan` automatically runs `jstack-plan-critic` as an internal gate using an independent context when the host supports it, or performs a distinct in-context critic pass when delegation is unavailable. It applies focused `REVISE` feedback and repeats until the critic returns `APPROVE` or a genuine unresolved decision blocks planning. The critic can also be invoked directly to review a supplied plan.
+3. Invoke `jstack-implement` with the approved ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored `.jstack/checkpoint.md` recovery snapshot while making the authorized local changes and running proportionate checks.
+4. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
 
-The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. Every phase returns a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. A non-Git workspace is marked explicitly. Skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
+The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. The planning, implementation, and code-review phases return a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. The plan critic instead returns only its decision, substantive findings, and optional residual risks. A non-Git workspace is marked explicitly when relevant. The handoff-producing skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence; the critic reconciles repository identity when it materially affects a finding. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
 
 Discovery starts from the task's paths, symbols, and actual change set, then expands through callers and tests as needed. Handoffs retain useful paths and unresolved coverage gaps. A truncated search or an inaccessible file is reported as a limitation rather than treated as evidence that relevant behavior is absent.
 
@@ -157,7 +161,7 @@ A checkpoint is a recovery aid, not a substitute for Git, source inspection, use
 
 ## Shared engineering contract
 
-All three skills follow the same core rules:
+All four skills follow the same core rules:
 
 - derive scope from the user's task and explicit acceptance criteria;
 - search for existing behavior before adding code;

@@ -47,7 +47,7 @@ project_root=$(pwd -P)
 install_to() {
   destination="$1"
   mkdir -p "$destination"
-  for skill in jstack-plan jstack-implement jstack-review; do
+  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do
     cp -R "$root/skills/$skill" "$destination/"
   done
   printf 'Installed JStack skills in %s\n' "$destination"
