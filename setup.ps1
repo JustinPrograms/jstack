@@ -14,7 +14,7 @@ param(
 # Install JStack's portable Markdown skills into a host's global or local skill root.
 # This is deliberately only an installer: it does not run as part of JStack.
 $sourceRoot = $PSScriptRoot
-$skillNames = @("jstack-plan", "jstack-implement", "jstack-review")
+$skillNames = @("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review")
 
 function Install-JStackSkills([string]$destination) {
   New-Item -ItemType Directory -Force $destination | Out-Null
