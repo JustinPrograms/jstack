@@ -28,6 +28,8 @@ Read-only local Git inspection is allowed. Use read-only remote retrieval only w
 5. Inventory the complete relevant change set: committed branch changes from the chosen merge base plus staged, unstaged, and untracked task files. Distinguish pre-existing unrelated work from the review target.
 6. Trace changed behavior through callers, state boundaries, errors, and nearby tests rather than reviewing isolated lines only.
 
+For changed stateful user workflows, derive one high-risk multi-step boundary transition and check it using the strongest available evidence—code, tests, or an authorized, safely isolated interface—prioritizing mutations that can invalidate current navigation, selection, or view state. Passing tests cover only the transitions they exercise; report a material unchecked transition as residual risk.
+
 If the intended diff or acceptance criteria are materially ambiguous, state the ambiguity and ask for the smallest clarification needed. Do not guess at a remote pull request or fetch one implicitly.
 
 ## Review lenses
