@@ -4,11 +4,11 @@ Status: accepted after reconciliation of the [vNext critique](vnext-architecture
 
 ## Responsibilities
 
-JStack supplies portable instructions for planning, implementation, and review. The host supplies conversation management, skill discovery, tools, permissions, and model execution. Current repository evidence establishes what code exists and what changed. Saved state helps recover intent and progress; it cannot authorize work or prove success.
+JStack supplies portable instructions for planning, plan criticism, implementation, and code review. The host supplies conversation management, skill discovery, tools, permissions, and model execution. Current repository evidence establishes what code exists and what changed. Saved state helps recover intent and progress; it cannot authorize work or prove success.
 
 | Concern | Owner and boundary |
 | --- | --- |
-| Public workflows | Three canonical directories: `jstack-plan`, `jstack-implement`, `jstack-review`. Keep portable name/description frontmatter. |
+| Public workflows | Four canonical directories: `jstack-plan`, `jstack-plan-critic`, `jstack-implement`, `jstack-review`. Keep portable name/description frontmatter. |
 | Repository discovery | The active agent uses existing filesystem, Git, text search, and available symbol tools. No persistent index or summaries. |
 | Context selection | Start from task and change evidence, follow relevant execution paths, and state incomplete coverage. Preserve criteria and applicable instructions. |
 | Recovery | One human-readable checkpoint per worktree, maintained by one coordinating implementation workflow. |
@@ -35,7 +35,7 @@ Retain the existing layout and schema:
   checkpoint.md
 ```
 
-Planning remains read-only, with a local plan file only when explicitly requested. Review remains report-only, with an explicit report export allowed within the user's request. Substantial authorized implementation maintains a checkpoint at meaningful milestones. Trivial edits need no checkpoint unless it adds recovery value.
+Planning remains read-only, with a local plan file only when explicitly requested. Plan criticism remains read-only and report-only. Code review remains report-only, with an explicit report export allowed within the user's request. Substantial authorized implementation maintains a checkpoint at meaningful milestones. Trivial edits need no checkpoint unless it adds recovery value.
 
 Private state must be contained within the current worktree, untracked, and ignored in Git workspaces. A tracked shared checkpoint requires explicit opt-in. A denied or unsafe write leaves existing files intact and produces an unsaved recovery snapshot in the conversation. It need not prevent otherwise safe authorized implementation. Non-Git work reports that ignore/tracking checks are unavailable. No automatic untracking, Git configuration change, or permission bypass is part of checkpoint saving.
 
@@ -53,7 +53,9 @@ Review applies to the actual base, criteria, and relevant contents inspected. Re
 
 ## Optional second opinions and helpers
 
-A second opinion is optional, bounded, and dependent on supported, authorized host facilities. The initial release adds no automatic second-review pipeline or provider calls. A later experiment must report context isolation and known model/provider identity separately, use the same review target, avoid exposing primary findings before the first pass, and reconcile evidence rather than vote counts. An unavailable optional reviewer leaves a labeled primary result; an explicitly required reviewer remains an unmet requirement.
+The plan critic is a required gate before `jstack-plan` marks a candidate `ready`. Use a fresh critic context when the host supports authorized skill delegation or subagents; otherwise use the documented distinct in-context pass. This fallback preserves the review contract but does not claim context independence. The gate does not authorize provider calls or automatic model switching.
+
+Any additional second opinion is optional, bounded, and dependent on supported, authorized host facilities. A future experiment must report context isolation and known model/provider identity separately, use the same review target, avoid exposing primary findings before the first pass, and reconcile evidence rather than vote counts. An unavailable optional reviewer leaves a labeled primary result; an explicitly required reviewer remains an unmet requirement.
 
 Repository preferences and saved state cannot enable a provider, choose an arbitrary executable/endpoint, or widen access. Existing shipped prohibitions on remote repository/service mutations remain intact. Any future inference integration must establish data and execution boundaries explicitly.
 
@@ -61,8 +63,8 @@ Executable acceleration requires a measured gap in native tools, a specific boun
 
 ## Delivery and validation
 
-This initial change implements the accepted contract, focused discovery/handoffs, conservative freshness guidance, and installed-package tests. It preserves public names, frontmatter, setup modes, and the checkpoint schema. It adds no runtime, cache, routing service, or state migration.
+The product implements the accepted contract, focused discovery/handoffs, conservative freshness guidance, the plan-critic gate, and installed-package tests. It preserves portable frontmatter, setup modes, and the checkpoint schema. It adds no runtime, cache, routing service, or state migration.
 
 Package tests copy and inspect complete skill directories, verify local resource containment, and exercise available native copiers in temporary local destinations. Static contract tests protect documented boundaries; they do not prove that an agent follows them. Host behavior needs the separate [workflow evaluation scenarios](workflow-evaluations.md), including a baseline on the original revision. No performance or cross-host reliability gain is claimed from static tests.
 
-Later changes are contingent on evidence: refine recovery if restart scenarios expose friction; add a thin resume entry point only for demonstrated discoverability gaps; evaluate a bounded second review before generalizing integrations; consider helpers only for measured bottlenecks. Packaging and threat checks accompany each affected change rather than waiting until the end of a large rollout.
+Later changes are contingent on evidence: refine recovery if restart scenarios expose friction; add a thin resume entry point only for demonstrated discoverability gaps; evaluate the bounded plan-critic gate before generalizing review integrations; consider helpers only for measured bottlenecks. Packaging and threat checks accompany each affected change rather than waiting until the end of a large rollout.
