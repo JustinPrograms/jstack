@@ -138,6 +138,8 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 
 The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. Every phase returns a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. A non-Git workspace is marked explicitly. Skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
 
+Discovery starts from the task's paths, symbols, and actual change set, then expands through callers and tests as needed. Handoffs retain useful paths and unresolved coverage gaps. A truncated search or an inaccessible file is reported as a limitation rather than treated as evidence that relevant behavior is absent.
+
 ## Checkpoint and resume
 
 During substantial implementation, JStack uses one human-readable recovery file:
@@ -151,7 +153,7 @@ During substantial implementation, JStack uses one human-readable recovery file:
 
 Start work with the host's normal skill invocation, for example `/jstack-implement JIRA-123` in Claude Code or `$jstack-implement JIRA-123` in Codex. If the session ends before the work is complete, start a later session in the same worktree and invoke the implementation skill again without a new task, or say `Continue from the jstack checkpoint.` The agent reads `.jstack/checkpoint.md`, inspects current Git status and relevant files, reconciles any drift, and resumes from the next valid unfinished step.
 
-A checkpoint is a recovery aid, not a substitute for Git, source inspection, user approval, or validation. Validation is current only when no relevant implementation has changed since the check ran. See the [checkpoint protocol](policies/checkpoint-protocol.md) for the full lifecycle and schema.
+A checkpoint is a recovery aid, not a substitute for Git, source inspection, user approval, or validation. Matching HEAD or a list of modified files alone cannot establish that old checks remain current. Checks whose execution or relevant inputs cannot be verified remain historical; review conclusions must also be revisited when their target or criteria change. If a checkpoint cannot be saved safely within host permissions, the agent returns the recovery snapshot in the conversation and explains what was not saved. See the [checkpoint protocol](policies/checkpoint-protocol.md) for the full lifecycle and schema.
 
 ## Shared engineering contract
 
@@ -173,10 +175,12 @@ System and host instructions plus applicable repository instruction files still 
 
 ## Development
 
-Node.js is used only for the repository's static contract tests; it is not a product requirement for using the skills.
+Node.js is used only for development tests; it is not a product requirement for using the skills.
 
 ```text
 npm test
 ```
 
-The tests validate the skill packages, portable frontmatter, safety boundaries, native discovery paths, and absence of the retired executable architecture.
+The tests validate skill packages, portable frontmatter, documented safety boundaries, native discovery paths, and absence of the retired executable architecture. Package tests check bundled resource containment and exercise available setup copiers in temporary local destinations, including repeat updates and preservation of unrelated files. Native copier tests report a skip when the required shell is unavailable or PowerShell policy prevents unsigned script execution; they do not alter that policy.
+
+Static tests do not establish agent behavior or token savings. The [architecture contract](docs/architecture.md) records the accepted scope, and [workflow evaluation scenarios](docs/workflow-evaluations.md) define the separate host checks and their current evidence.
