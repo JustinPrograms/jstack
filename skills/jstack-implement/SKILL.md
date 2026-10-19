@@ -28,6 +28,8 @@ Read-only local Git inspection and relevant read-only retrieval are allowed when
 5. For a small, precise change, derive a short implementation checklist and proceed. For a material unresolved product or architecture choice, stop and route the task to `jstack-plan`.
 6. Confirm that the requested work does not include a remote mutation or an unrequested Git-history change.
 
+Before editing, turn each acceptance criterion into observable proof: the behavior that must change, the behavior that must stay unchanged, and the check that will demonstrate both. Include relevant failure paths, boundary values, invalid input, and state transitions when the task can reach them. Do not invent edge cases that the product cannot reach.
+
 ## Inspect before editing
 
 Start from task paths and symbols or the reconciled handoff's repository anchors, then verify the current files. Use focused filename/content search (`rg --files`, `rg`, Git search, or available host tools) before a broad inventory. Include relevant untracked work and applicable hidden instructions/configuration; do not interpret ignored files, truncated output, or search errors as evidence that a path is absent. Expand into callers, shared dependencies, and tests when the selected context leaves a material gap, including generated or vendored code when it is in scope.
@@ -44,9 +46,13 @@ Work in coherent, reviewable units:
 
 1. Make the smallest edit that advances an acceptance criterion.
 2. Inspect the resulting diff and affected callers.
-3. Add or update focused tests when behavior changes, following nearby test structure.
-4. Run the narrowest relevant check, then broaden verification in proportion to the change and repository guidance.
-5. Recheck Git status and the complete task diff for accidental or unrelated changes.
+3. For a bug fix, reproduce the failure first with a focused test or bounded command when practical. If reproduction is unsafe, unavailable, or disproportionately expensive, state that limitation rather than implying the defect was observed.
+4. Add or update focused tests when behavior changes, following nearby test structure. Assert externally meaningful outcomes rather than implementation details, and include the most likely regression path—not only the happy path.
+5. Run the narrowest relevant check, then broaden verification in proportion to the change and repository guidance. Run applicable type, lint, build, and test commands that cover the touched behavior; do not weaken assertions, disable checks, or update snapshots blindly to obtain a pass.
+6. When a check fails, read the actual failure, decide whether it is caused by the patch, and make the smallest evidence-backed correction. Do not repeatedly guess at fixes or absorb unrelated failures into the task. Report any unresolved or plausibly pre-existing failure with the command and relevant output summary.
+7. Recheck Git status and the complete task diff for accidental files, debug output, placeholders, broad formatting churn, commented-out code, unjustified suppressions, and unrelated changes.
+
+Before calling the implementation ready, map every acceptance criterion to a current check, direct inspection, or an explicit limitation. A passing broad suite does not replace targeted evidence for changed behavior, and a focused pass does not establish repository-wide health.
 
 Do not future-proof without evidence, introduce a second implementation of an existing rule, or broaden the task for opportunistic cleanup. If current evidence invalidates a material part of the plan, preserve safe completed work, explain the conflict, and request a revised decision through `jstack-plan` instead of inventing around it.
 
