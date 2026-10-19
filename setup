@@ -66,7 +66,7 @@ install_to() {
   fi
 
   mkdir -p "$destination"
-  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do
+  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do
     target="$destination/$skill"
     temporary="$destination/.$skill.jstack-new.$$"
     backup="$target.pre-jstack-backup"
@@ -94,7 +94,7 @@ install_to() {
 
 validate_destination() {
   destination="$1"
-  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do
+  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do
     target="$destination/$skill"
     if [ -e "$target" ] && [ ! -f "$target/.jstack-managed" ] && [ "$force" -ne 1 ]; then
       echo "Refusing to overwrite unmanaged skill: $target (rerun with --force to preserve and replace it)" >&2

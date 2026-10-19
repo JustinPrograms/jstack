@@ -8,7 +8,7 @@ JStack supplies portable instructions for planning, plan criticism, implementati
 
 | Concern | Owner and boundary |
 | --- | --- |
-| Public workflows | Four canonical directories: `jstack-plan`, `jstack-plan-critic`, `jstack-implement`, `jstack-review`. Keep portable name/description frontmatter. |
+| Public workflows | Five canonical directories: `jstack-plan`, `jstack-plan-critic`, `jstack-implement`, `jstack-review`, `jstack-test`. Keep portable name/description frontmatter. |
 | Repository discovery | The active agent uses existing filesystem, Git, text search, and available symbol tools. No persistent index or summaries. |
 | Context selection | Start from task and change evidence, follow relevant execution paths, and state incomplete coverage. Preserve criteria and applicable instructions. |
 | Recovery | One human-readable checkpoint per worktree, maintained by one coordinating implementation workflow. |

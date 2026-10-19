@@ -10,8 +10,9 @@ const expectedSkills = [
   "jstack-plan",
   "jstack-plan-critic",
   "jstack-review",
+  "jstack-test",
 ];
-const handoffSkills = ["jstack-implement", "jstack-plan", "jstack-review"];
+const handoffSkills = ["jstack-implement", "jstack-plan", "jstack-review", "jstack-test"];
 
 async function pathExists(relativePath) {
   try {
@@ -55,7 +56,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly four canonical Markdown skills", async () => {
+test("ships exactly five canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -153,6 +154,9 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
   assert.match(skills["jstack-review"], /Report findings only/u);
   assert.match(skills["jstack-review"], /committed branch changes from the chosen merge base/u);
   assert.match(skills["jstack-review"], /no reliable base exists/u);
+  assert.match(skills["jstack-test"], /Do not fix production behavior/u);
+  assert.match(skills["jstack-test"], /risk-based test matrix/u);
+  assert.match(skills["jstack-test"], /coverage[\s\S]*not evidence that behavior is correct/iu);
   assert.match(skills["jstack-plan-critic"], /Keep this workflow read-only and report-only/u);
   assert.match(skills["jstack-plan-critic"], /Do not implement code/u);
   assert.match(skills["jstack-plan-critic"], /Do not silently modify the plan/u);
@@ -217,11 +221,11 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do/u,
+    /for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do/u,
   );
   assert.match(
     powerShellSetup,
-    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review"\)/u,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test"\)/u,
   );
 
   for (const source of [shellSetup, powerShellSetup]) {
