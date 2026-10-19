@@ -223,4 +223,3 @@ The tests validate skill packages, portable frontmatter, documented safety bound
 
 Static tests do not establish agent behavior or token savings. The [architecture contract](docs/architecture.md) records the accepted scope, and [workflow evaluation scenarios](docs/workflow-evaluations.md) define the separate host checks and their current evidence.
 
-

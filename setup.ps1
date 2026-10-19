@@ -92,4 +92,3 @@ foreach ($hostName in $hosts) {
   Install-JStackSkills (Get-JStackDestination $hostName)
 }
 
-

@@ -240,4 +240,3 @@ test("PowerShell setup previews changes and preserves unmanaged collisions", asy
   );
 });
 
-
