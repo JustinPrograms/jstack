@@ -1,10 +1,36 @@
 # JStack
 
+[![CI](https://github.com/JustinPrograms/jstack/actions/workflows/ci.yml/badge.svg)](https://github.com/JustinPrograms/jstack/actions/workflows/ci.yml)
+
 JStack is a small collection of portable Markdown skills for planning, critiquing plans, implementing, and reviewing software changes with coding agents. The agent host supplies the conversation, repository tools, permissions, and skill discovery; JStack supplies the workflow instructions.
 
 JStack does not ship a task runtime, command parser, background service, checkpoint engine, or terminal interface. Its only executable code is a tiny optional setup copier; using the skills does not require Node.js or a package installation.
 
 The workflow is an original implementation inspired by gstack's public product shape. JStack does not use gstack source code or setup scripts.
+
+## Quick start
+
+Clone JStack once, install it for your host, and restart the host if the skills do not appear immediately:
+
+```sh
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack
+sh ~/.jstack/setup --host codex --scope global
+```
+
+```powershell
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\.jstack"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.jstack\setup.ps1" -Host codex -Scope global
+```
+
+Then take a change through the workflow:
+
+```text
+$jstack-plan Add optimistic locking to invoice updates.
+$jstack-implement Continue with the approved plan.
+$jstack-review Review the resulting local change set.
+```
+
+Planning and review are report-only. Implementation changes local task files and runs proportionate checks, but does not stage, commit, push, or mutate remote services. Use `claude` or `bob` instead of `codex` when installing for those hosts.
 
 ## Skills
 
@@ -32,6 +58,12 @@ skills/
 ```
 
 There are no platform-specific copies. The same canonical folders are installed into every supported host.
+
+| Surface | Package/install coverage | Live workflow certification |
+| --- | --- | --- |
+| Claude Code | POSIX copier covered by tests | Evaluation scenarios defined; results not yet published |
+| OpenAI Codex | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
+| IBM Bob | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
 
 ## Install - two simple modes
 
@@ -82,6 +114,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" 
 ```
 
 Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
+
+The installer marks directories it owns and replaces those directories exactly during updates, preventing removed package files from lingering. It refuses to overwrite an unmarked directory with the same skill name. Use `--dry-run` (`-DryRun` in PowerShell) to preview an installation. If an unmarked directory is an older JStack installation you want to migrate, rerun with `--force` (`-Force`); the installer preserves the old directory with a `.pre-jstack-backup` suffix before installing the managed copy.
 
 ## Manual project install
 
@@ -188,3 +222,4 @@ npm test
 The tests validate skill packages, portable frontmatter, documented safety boundaries, native discovery paths, and absence of the retired executable architecture. Package tests check bundled resource containment and exercise available setup copiers in temporary local destinations, including repeat updates and preservation of unrelated files. Native copier tests report a skip when the required shell is unavailable or PowerShell policy prevents unsigned script execution; they do not alter that policy.
 
 Static tests do not establish agent behavior or token savings. The [architecture contract](docs/architecture.md) records the accepted scope, and [workflow evaluation scenarios](docs/workflow-evaluations.md) define the separate host checks and their current evidence.
+

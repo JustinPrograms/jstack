@@ -6,16 +6,22 @@ set -eu
 
 usage() {
   cat <<'EOF'
-Usage: ./setup --host <claude|codex|bob|all> --scope <global|local>
+Usage: ./setup --host <claude|codex|bob|all> --scope <global|local> [--force] [--dry-run]
 
 Copies the JStack skills into the selected host's personal directory (`global`)
 or the current repository (`local`).
 No dependencies beyond a POSIX shell and standard file-copy tools are needed.
+
+Existing JStack-managed skill directories are replaced exactly so retired files
+do not survive an update. An unmarked directory is never overwritten unless
+--force is supplied; the forced migration preserves it with a backup suffix.
 EOF
 }
 
 host=""
 scope=""
+force=0
+dry_run=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --host)
@@ -27,6 +33,14 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || { usage >&2; exit 2; }
       scope="$2"
       shift 2
+      ;;
+    --force)
+      force=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
       ;;
     --help|-h)
       usage
@@ -46,11 +60,47 @@ project_root=$(pwd -P)
 
 install_to() {
   destination="$1"
+  if [ "$dry_run" -eq 1 ]; then
+    printf 'Would install JStack skills in %s\n' "$destination"
+    return
+  fi
+
   mkdir -p "$destination"
   for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do
-    cp -R "$root/skills/$skill" "$destination/"
+    target="$destination/$skill"
+    temporary="$destination/.$skill.jstack-new.$$"
+    backup="$target.pre-jstack-backup"
+
+    cp -R "$root/skills/$skill" "$temporary"
+    : > "$temporary/.jstack-managed"
+
+    if [ -e "$target" ]; then
+      if [ -f "$target/.jstack-managed" ]; then
+        rm -rf -- "$target"
+      else
+        [ ! -e "$backup" ] || {
+          rm -rf -- "$temporary"
+          echo "Cannot preserve unmanaged skill because backup already exists: $backup" >&2
+          exit 1
+        }
+        mv -- "$target" "$backup"
+        printf 'Preserved unmanaged skill in %s\n' "$backup"
+      fi
+    fi
+    mv -- "$temporary" "$target"
   done
   printf 'Installed JStack skills in %s\n' "$destination"
+}
+
+validate_destination() {
+  destination="$1"
+  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review; do
+    target="$destination/$skill"
+    if [ -e "$target" ] && [ ! -f "$target/.jstack-managed" ] && [ "$force" -ne 1 ]; then
+      echo "Refusing to overwrite unmanaged skill: $target (rerun with --force to preserve and replace it)" >&2
+      return 1
+    fi
+  done
 }
 
 destination_for() {
@@ -73,11 +123,18 @@ if [ "$scope" = "local" ] && [ "$project_root" = "$root" ]; then
 fi
 
 case "$host" in
-  claude|codex|bob) install_to "$(destination_for "$host")" ;;
+  claude|codex|bob)
+    validate_destination "$(destination_for "$host")"
+    install_to "$(destination_for "$host")"
+    ;;
   all)
+    for selected_host in claude codex bob; do
+      validate_destination "$(destination_for "$selected_host")"
+    done
     for selected_host in claude codex bob; do
       install_to "$(destination_for "$selected_host")"
     done
     ;;
   *) usage >&2; exit 2 ;;
 esac
+
