@@ -223,3 +223,9 @@ The tests validate skill packages, portable frontmatter, documented safety bound
 
 Static tests do not establish agent behavior or token savings. The [architecture contract](docs/architecture.md) records the accepted scope, and [workflow evaluation scenarios](docs/workflow-evaluations.md) define the separate host checks and their current evidence.
 
+## Licensing
+
+JStack is open-source software licensed under the [GNU Affero General Public License v3.0 or later](LICENSE). Commercial use is permitted under the AGPL when its terms are followed.
+
+Organizations that need to use, modify, or distribute JStack under different terms may request a separate paid commercial license. See [commercial licensing](COMMERCIAL-LICENSE.md). Unless you have a separate written agreement with the copyright holder, the AGPL applies.
+

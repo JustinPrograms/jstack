@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "private": true,
   "description": "Portable Markdown skills for planning, implementing, and reviewing software changes with coding agents.",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -11,3 +12,4 @@
     "test": "node --test"
   }
 }
+
