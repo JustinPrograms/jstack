@@ -1,0 +1,68 @@
+name: Bug report
+description: Report reproducible behavior that is incorrect or unsafe
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a JStack bug. Remove secrets, private repository content, and customer data before submitting.
+  - type: input
+    id: version
+    attributes:
+      label: JStack version
+      description: Provide a release, tag, or commit SHA.
+      placeholder: v0.2.0 or 07ca0ea
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Agent host
+      options:
+        - Claude Code
+        - OpenAI Codex
+        - IBM Bob
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest safe sequence that reproduces the problem.
+      placeholder: |
+        1. Install...
+        2. Invoke...
+        3. Observe...
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant output
+      description: Add concise logs or screenshots with sensitive information removed.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Include the operating system, host version, and any relevant repository constraints.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests for this problem.
+          required: true
+        - label: This report contains no secrets, private source, or customer data.
+          required: true
+        - label: This is not a security vulnerability. I will follow SECURITY.md for security reports.
+          required: true
