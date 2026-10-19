@@ -59,7 +59,7 @@ async function checkResources(directory) {
   return links;
 }
 
-async function checkInstalled(destination) {
+async function checkInstalled(destination, { managed = false } = {}) {
   for (const skill of skills) {
     const source = path.join(root, "skills", skill);
     const installed = path.join(destination, skill);
@@ -73,6 +73,9 @@ async function checkInstalled(destination) {
     const links = await checkResources(installed);
     if (skill === "jstack-implement") {
       assert.ok(links > 0, "implementation must link to its bundled checkpoint schema");
+    }
+    if (managed) {
+      assert.equal(await readFile(path.join(installed, ".jstack-managed"), "utf8"), "");
     }
   }
 }
@@ -138,10 +141,10 @@ async function checkCopier(t, command, args) {
   const first = run(command, args, project);
   assert.equal(first.status, 0, first.stderr || first.stdout);
   for (const hostRoot of hostRoots) {
-    await checkInstalled(path.join(project, hostRoot));
-    // Simulate an older installed version while preserving a user-owned extra file.
+    await checkInstalled(path.join(project, hostRoot), { managed: true });
+    // Simulate an older managed version with a retired package file.
     await writeFile(path.join(project, hostRoot, "jstack-plan", "SKILL.md"), "older version\n");
-    await writeFile(path.join(project, hostRoot, "jstack-plan", "user-notes.md"), "keep my notes\n");
+    await writeFile(path.join(project, hostRoot, "jstack-plan", "retired-file.md"), "remove me\n");
   }
 
   const second = run(command, args, project);
@@ -150,11 +153,36 @@ async function checkCopier(t, command, args) {
   assert.equal(await readFile(path.join(project, "README.md"), "utf8"), "unrelated project file\n");
   for (const hostRoot of hostRoots) {
     const destination = path.join(project, hostRoot);
-    await checkInstalled(destination);
+    await checkInstalled(destination, { managed: true });
     assert.deepEqual((await readdir(destination)).sort(), [...skills, "user-skill"].sort());
     assert.equal(await readFile(path.join(destination, "user-skill", "SKILL.md"), "utf8"), "unrelated user skill\n");
-    assert.equal(await readFile(path.join(destination, "jstack-plan", "user-notes.md"), "utf8"), "keep my notes\n");
+    await assert.rejects(readFile(path.join(destination, "jstack-plan", "retired-file.md")), { code: "ENOENT" });
   }
+}
+
+async function checkCollisionSafety(t, command, args, forceFlag, dryRunFlag) {
+  const directory = await workspace(t);
+  const project = path.join(directory, "project");
+  const destination = path.join(project, ".agents", "skills");
+  const target = path.join(destination, "jstack-plan");
+  await mkdir(target, { recursive: true });
+  await writeFile(path.join(target, "SKILL.md"), "custom skill\n");
+
+  const refused = run(command, args, project);
+  assert.notEqual(refused.status, 0);
+  assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "custom skill\n");
+
+  const preview = run(command, [...args, forceFlag, dryRunFlag], project);
+  assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+  assert.equal(await readFile(path.join(target, "SKILL.md"), "utf8"), "custom skill\n");
+
+  const migrated = run(command, [...args, forceFlag], project);
+  assert.equal(migrated.status, 0, migrated.stderr || migrated.stdout);
+  await checkInstalled(destination, { managed: true });
+  assert.equal(
+    await readFile(path.join(destination, "jstack-plan.pre-jstack-backup", "SKILL.md"), "utf8"),
+    "custom skill\n",
+  );
 }
 
 test("POSIX setup installs and updates all local host packages without changing unrelated files", async (t) => {
@@ -172,6 +200,18 @@ test("POSIX setup rejects invalid hosts before creating destinations", async (t)
   assert.deepEqual(await readdir(directory), []);
 });
 
+test("POSIX setup previews changes and preserves unmanaged collisions", async (t) => {
+  const command = shellCommand();
+  if (!command) return t.skip("POSIX shell unavailable");
+  await checkCollisionSafety(
+    t,
+    command,
+    [path.join(root, "setup").replaceAll("\\", "/"), "--host", "codex", "--scope", "local"],
+    "--force",
+    "--dry-run",
+  );
+});
+
 test("PowerShell setup installs and updates all local host packages without changing unrelated files", async (t) => {
   const command = powerShellCommand();
   if (!command) return t.skip("PowerShell unavailable");
@@ -182,3 +222,22 @@ test("PowerShell setup installs and updates all local host packages without chan
   }
   await checkCopier(t, command, ["-NoProfile", "-NonInteractive", "-File", path.join(root, "setup.ps1"), "-Host", "all", "-Scope", "local"]);
 });
+
+test("PowerShell setup previews changes and preserves unmanaged collisions", async (t) => {
+  const command = powerShellCommand();
+  if (!command) return t.skip("PowerShell unavailable");
+  const policy = run(command, ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"], root);
+  assert.equal(policy.status, 0, policy.stderr);
+  if (["Restricted", "AllSigned"].includes(policy.stdout.trim())) {
+    return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
+  }
+  await checkCollisionSafety(
+    t,
+    command,
+    ["-NoProfile", "-NonInteractive", "-File", path.join(root, "setup.ps1"), "-Host", "codex", "-Scope", "local"],
+    "-Force",
+    "-DryRun",
+  );
+});
+
+
