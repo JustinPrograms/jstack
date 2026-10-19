@@ -36,7 +36,14 @@ Before reporting, recheck the selected base, criteria, status, and relevant file
 
 ## Review lenses
 
-Check the change for:
+Review in four focused passes. Revisit earlier passes when later evidence changes the conclusion:
+
+1. **Contract:** map every acceptance criterion and stated non-goal to the diff, including user-visible behavior and documentation.
+2. **Execution:** trace changed inputs through callers, state transitions, side effects, and error handling. Check the happy path plus reachable boundary, invalid-input, partial-failure, retry, concurrency, authorization, and compatibility paths that matter for this change.
+3. **Tests:** confirm tests exercise the changed behavior and would fail for the regression they claim to cover. Look for missing negative cases, assertions that only prove setup or status, over-mocking, stale snapshots, nondeterminism, and important production branches that remain unexecuted.
+4. **Diff quality:** look for duplicated rules, bypassed abstractions, accidental generated files, debug output, placeholders, broad formatting churn, unnecessary dependencies, and unrelated scope.
+
+Across those passes, check the change for:
 
 - unmet or contradicted acceptance criteria;
 - correctness bugs, invalid states, error-path gaps, races, and compatibility regressions;
@@ -47,6 +54,12 @@ Check the change for:
 - user-visible behavior or documentation that no longer matches the implementation.
 
 Prioritize concrete defects over style preferences. Do not report a possibility as a finding without a reachable failure mode or specific maintenance cost.
+
+## Confirm findings
+
+Before reporting a blocker or should-fix item, try to disprove it. Re-read the relevant caller and test, check whether validation or a guard exists elsewhere, and use the smallest safe reproduction or focused check when available. A finding must identify the triggering condition, the incorrect outcome, and why the current code permits it. If one of those is missing, continue investigating or record it as a residual risk instead of presenting speculation as a defect.
+
+Do not inflate severity because an area is sensitive. Severity follows demonstrated impact and reachability. Do not duplicate one root cause across several findings; report the root cause once and mention its distinct effects.
 
 ## Report
 
@@ -59,6 +72,8 @@ List findings first, ordered by severity:
 For each finding, give a concise title, severity, exact path and line when available, the failure scenario or impact, supporting evidence, and the smallest fix direction. Keep optional follow-up separate from required corrections.
 
 If there are no findings, say so directly and note residual risks or checks not run. End with the review target, checks performed, and an exact next action: return blockers and should-fix items to `jstack-implement`, or hand a clean result back to the user for their chosen local next step. Do not promise approval or claim tests passed unless you observed them.
+
+A clean review means no actionable defect was found in the inspected target; it does not prove the change is defect-free. Keep that statement brief and name only material gaps in coverage or validation.
 
 Review remains report-only and does not update the checkpoint. When a checkpoint claim is stale or review finds unfinished or incorrect work, include the correction in the review handoff so `jstack-implement` can reconcile the checkpoint while applying authorized fixes.
 
