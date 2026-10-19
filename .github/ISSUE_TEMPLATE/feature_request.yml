@@ -1,0 +1,48 @@
+name: Feature or skill proposal
+description: Suggest an improvement to JStack's skills, workflow, or compatibility
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What recurring problem should JStack solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the observable workflow or outcome, not only an implementation idea.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: Show a concise invocation, scenario, or expected handoff when possible.
+  - type: checkboxes
+    id: hosts
+    attributes:
+      label: Relevant hosts
+      description: Select every host where this should work.
+      options:
+        - label: Claude Code
+        - label: OpenAI Codex
+        - label: IBM Bob
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Tradeoffs and alternatives
+      description: What could become more complex, less portable, or less safe?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and pull requests for similar proposals.
+          required: true
+        - label: The proposal does not depend on sharing private prompts, source, or credentials.
+          required: true
