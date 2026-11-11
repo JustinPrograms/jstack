@@ -19,6 +19,22 @@ The user's current request defines the scope and authority. Follow system and ho
 
 Read-only local Git inspection and relevant read-only retrieval are allowed when the host permits them. A clear request to implement or fix authorizes task-scoped source and test edits plus proportionate local checks unless the user narrows that authority. It does not authorize Git-history or remote changes.
 
+## Show progress in chat
+
+At the start, show a short Markdown checklist in the conversation using `- [ ]` for unfinished work and `- [x]` for completed work. Derive concrete, task-specific items from the requested change or plan, including verification and final diff inspection. For example:
+
+```text
+- [ ] Add the login endpoint
+- [ ] Connect the login form
+- [ ] Handle invalid credentials
+- [ ] Run focused tests
+- [ ] Check the final diff against acceptance criteria
+```
+
+Refresh the checklist at meaningful milestones with a brief sentence explaining what changed, what comes next, or what is blocked; do not repeat it after every tool call. Keep blocked work unchecked and explain the blocker beside it or in the accompanying sentence. Check an item only when supported by current evidence. Writing tests does not mean they passed; keep test creation and execution distinct when both are needed, and never check off failed, skipped, or interrupted validation as passed. Reopen items when relevant changes invalidate their completion.
+
+On resume, reconcile progress with the current task and checkout before showing prior items as complete. The chat checklist presents the existing work; it does not add workflow steps, approvals, files, or checkpoint writes. Keep it consistent with any existing checkpoint under the unchanged checkpoint rules, and retain the final handoff.
+
 ## Establish the implementation target
 
 1. Identify every repository or worktree in scope, read its instructions, and record a pre-edit Git status and diff baseline. If a workspace is not a Git repository, say so and record the available filesystem or host change baseline.
