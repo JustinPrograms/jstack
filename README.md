@@ -183,6 +183,8 @@ The skills exchange context through the conversation, a user-supplied Markdown h
 
 Discovery starts from the task's paths, symbols, and actual change set, then expands through callers and tests as needed. Handoffs retain useful paths and unresolved coverage gaps. A truncated search or an inaccessible file is reported as a limitation rather than treated as evidence that relevant behavior is absent.
 
+During planning and implementation, a short task-specific checklist in chat shows completed and remaining work. It refreshes at meaningful milestones with a brief progress update. This is presentation only: workflow gates, permissions, checkpoint behavior, and final handoffs stay the same.
+
 ## Checkpoint and resume
 
 During substantial implementation, JStack uses one human-readable recovery file:
