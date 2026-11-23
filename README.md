@@ -31,6 +31,8 @@ $jstack-test Add focused regression and edge-case tests for the change.
 $jstack-review Review the resulting local change set.
 ```
 
+Or let JStack choose the remaining stages: `$jstack-run full Add optimistic locking to invoice updates.` Use `$jstack-run partial ...` when you want it to pause for unresolved product or design choices.
+
 Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude` or `bob` instead of `codex` when installing for those hosts.
 
 ## Skills
@@ -42,6 +44,7 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
 | `jstack-test` | Add and run focused tests for changed behavior, regressions, and reachable edge cases. | Local test edits and checks |
 | `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
+| `jstack-run` | Start or resume the remaining JStack stages from verified task state. | Coordinates stage-specific work |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
@@ -58,6 +61,8 @@ skills/
   jstack-test/
     SKILL.md
   jstack-review/
+    SKILL.md
+  jstack-run/
     SKILL.md
 ```
 
@@ -76,7 +81,7 @@ Like gstack, the easiest route is to paste an instruction into your coding agent
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
 
-The setup copier places only the five Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+The setup copier places only the six Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
 
 ### Global setup
 
@@ -151,11 +156,11 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 ### Project paths
 
-From the JStack repository root, install the five skill folders into the project:
+From the JStack repository root, install the six skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-run .claude/skills/
 ```
 
 Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
@@ -164,7 +169,7 @@ For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-run .agents/skills/
 ```
 
 Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, or `$jstack-review`.
@@ -174,7 +179,7 @@ On Windows PowerShell, use the equivalent commands below:
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-run .agents/skills
 ```
 
 After copying the folders:
@@ -185,6 +190,8 @@ After copying the folders:
 
 The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 
+Invoke `/jstack-run` in Claude Code or Bob, or `$jstack-run` in Codex, with a new task or a precise continuation request. For example: `$jstack-run full Add authentication to my app.` or `$jstack-run partial Continue this task from .jstack/checkpoints/issue-28-a1b2c3d4.md through tests and review.` `full` (the default) lets the agent make defensible task-scoped decisions; `partial` pauses for unresolved product or design choices that materially affect the result. The coordinator checks the actual task diff and validation before choosing the next stage. An explicit request such as “review only” limits the stages in either mode; a bare “continue” with multiple possible tasks requires a task or checkpoint path. Neither mode authorizes commits, pushes, PR actions, or deployment.
+
 Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), and the [Agent Skills specification](https://agentskills.io/specification).
 
 ## Workflow
@@ -194,6 +201,8 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 3. Invoke `jstack-implement` with the approved ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored task-scoped `.jstack/checkpoints/<task-id>.md` recovery snapshot while making the authorized local changes and running proportionate checks.
 4. Invoke `jstack-test` when the change needs stronger regression coverage or focused edge-case testing. It may edit tests and fixtures, but routes production defects back through `jstack-implement`.
 5. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
+
+`jstack-run` can coordinate these stages for a new task or join after a ready plan, implementation, test, review, or interruption. It uses host-installed JStack skills when the host can invoke them. Otherwise it applies their installed instructions in separate in-context stages and says which stages were applied rather than invoked. It stops when required instructions or evidence are unavailable, and bounds review-fix cycles.
 
 The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. The planning, implementation, testing, and code-review phases return a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. The plan critic instead returns only its decision, substantive findings, and optional residual risks. A non-Git workspace is marked explicitly when relevant. The handoff-producing skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence; the critic reconciles repository identity when it materially affects a finding. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
 
@@ -217,7 +226,7 @@ A checkpoint is a recovery aid, not a substitute for Git, source inspection, use
 
 ## Shared engineering contract
 
-All five skills follow the same core rules:
+All six skills follow the same core rules:
 
 - derive scope from the user's task and explicit acceptance criteria;
 - search for existing behavior before adding code;
