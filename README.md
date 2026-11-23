@@ -41,7 +41,7 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-plan-critic` | Challenge a candidate plan and return approval or focused required revisions. | Report-only |
 | `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
 | `jstack-test` | Add and run focused tests for changed behavior, regressions, and reachable edge cases. | Local test edits and checks |
-| `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
+| `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. Ask to include nits for optional polish suggestions. | Report-only |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
