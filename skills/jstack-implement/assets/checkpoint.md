@@ -6,6 +6,11 @@ Replace placeholders and stale statements with a concise current snapshot. Do no
 
 active
 
+## Checkpoint Identity
+
+- Task ID: not recorded.
+- Checkpoint path: .jstack/checkpoints/<task-id>.md
+
 ## Task
 
 Not recorded.

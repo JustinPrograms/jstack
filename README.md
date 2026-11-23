@@ -175,7 +175,7 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 
 1. Invoke `jstack-plan` with the task or story. It inspects the repository, identifies existing code to reuse, resolves material decisions, and drafts a candidate plan.
 2. `jstack-plan` automatically runs `jstack-plan-critic` as an internal gate using an independent context when the host supports it, or performs a distinct in-context critic pass when delegation is unavailable. It applies focused `REVISE` feedback and repeats until the critic returns `APPROVE` or a genuine unresolved decision blocks planning. The critic can also be invoked directly to review a supplied plan.
-3. Invoke `jstack-implement` with the approved ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored `.jstack/checkpoint.md` recovery snapshot while making the authorized local changes and running proportionate checks.
+3. Invoke `jstack-implement` with the approved ready plan or a precise implementation request. For substantial unfinished work, it maintains an ignored task-scoped `.jstack/checkpoints/<task-id>.md` recovery snapshot while making the authorized local changes and running proportionate checks.
 4. Invoke `jstack-test` when the change needs stronger regression coverage or focused edge-case testing. It may edit tests and fixtures, but routes production defects back through `jstack-implement`.
 5. Invoke `jstack-review` against the resulting local diff. It reports findings without fixing them. Send required corrections back through `jstack-implement`.
 
@@ -185,16 +185,17 @@ Discovery starts from the task's paths, symbols, and actual change set, then exp
 
 ## Checkpoint and resume
 
-During substantial implementation, JStack uses one human-readable recovery file:
+During substantial implementation, JStack uses one human-readable recovery file per task:
 
 ```text
 .jstack/
-  checkpoint.md
+  checkpoints/
+    issue-28-a1b2c3d4.md
 ```
 
-`.jstack/` is local workflow state and should normally be gitignored. The checkpoint records the current task, progress, decisions, touched files, validation, blockers, required approvals, checkout anchors, and one next action. It is updated at meaningful milestones rather than after every edit.
+`.jstack/` is local workflow state and should normally be gitignored. Each implementation attempt gets a unique task ID and owns one checkpoint; other tasks can keep their checkpoints in the same worktree. The checkpoint records identity, progress, decisions, touched files, validation, blockers, required approvals, checkout anchors, and one next action. It is updated at meaningful milestones rather than after every edit.
 
-Start work with the host's normal skill invocation, for example `/jstack-implement JIRA-123` in Claude Code or `$jstack-implement JIRA-123` in Codex. If the session ends before the work is complete, start a later session in the same worktree and invoke the implementation skill again without a new task, or say `Continue from the jstack checkpoint.` The agent reads `.jstack/checkpoint.md`, inspects current Git status and relevant files, reconciles any drift, and resumes from the next valid unfinished step.
+Start work with the host's normal skill invocation, for example `/jstack-implement JIRA-123` in Claude Code or `$jstack-implement JIRA-123` in Codex. An unfinished handoff includes the exact task ID and checkpoint path. To resume, supply that path, for example `Continue from .jstack/checkpoints/issue-28-a1b2c3d4.md.` A task name alone works when it identifies exactly one checkpoint in this checkout. `Continue from the jstack checkpoint.` works only when there is exactly one safe resumable checkpoint. The agent reconciles the selected file with Git status and relevant files before continuing. A new task gets a new file even when another task is unfinished. Successful completion removes only its own checkpoint; interrupted or blocked work retains it.
 
 A checkpoint is a recovery aid, not a substitute for Git, source inspection, user approval, or validation. Matching HEAD or a list of modified files alone cannot establish that old checks remain current. Checks whose execution or relevant inputs cannot be verified remain historical; review conclusions must also be revisited when their target or criteria change. If a checkpoint cannot be saved safely within host permissions, the agent returns the recovery snapshot in the conversation and explains what was not saved. See the [checkpoint protocol](policies/checkpoint-protocol.md) for the full lifecycle and schema.
 

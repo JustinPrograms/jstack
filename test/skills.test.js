@@ -243,13 +243,14 @@ test("optional setup copiers install only the canonical skills into host roots",
   assert.match(powerShellSetup, /Alias\("Scope"\)/u);
 });
 
-test("checkpoint recovery is Markdown-only, repository-reconciled, and validation-aware", async () => {
-  const [policy, template, plan, implement, review, agents, readme, gitignore, packageJson] =
+test("task checkpoints remain isolated, resumable, private, and self-cleaning", async () => {
+  const [policy, template, plan, implement, testSkill, review, agents, readme, gitignore, packageJson] =
     await Promise.all([
       readFile(path.join(root, "policies/checkpoint-protocol.md"), "utf8"),
       readFile(path.join(root, "skills/jstack-implement/assets/checkpoint.md"), "utf8"),
       readFile(path.join(root, "skills/jstack-plan/SKILL.md"), "utf8"),
       readFile(path.join(root, "skills/jstack-implement/SKILL.md"), "utf8"),
+      readFile(path.join(root, "skills/jstack-test/SKILL.md"), "utf8"),
       readFile(path.join(root, "skills/jstack-review/SKILL.md"), "utf8"),
       readFile(path.join(root, "AGENTS.md"), "utf8"),
       readFile(path.join(root, "README.md"), "utf8"),
@@ -259,6 +260,7 @@ test("checkpoint recovery is Markdown-only, repository-reconciled, and validatio
 
   for (const heading of [
     "Status",
+    "Checkpoint Identity",
     "Task",
     "Objective",
     "Acceptance Criteria",
@@ -276,20 +278,31 @@ test("checkpoint recovery is Markdown-only, repository-reconciled, and validatio
     assert.match(template, new RegExp(`^## ${heading}$`, "mu"), `checkpoint needs ${heading}`);
   }
 
-  assert.match(policy, /\.jstack\/[\r\n]+\s*checkpoint\.md/u);
+  assert.match(policy, /\.jstack\/[\r\n]+\s*checkpoints\/[\r\n]+\s*<task-id>\.md/u);
+  assert.match(policy, /Another task's active checkpoint never blocks creation/u);
+  assert.match(policy, /If none or several match, request an exact checkpoint path/u);
+  assert.match(policy, /delete exactly this task's checkpoint/u);
+  assert.match(policy, /Interrupted, blocked, failed, or still-reviewable work keeps its checkpoint/u);
+  assert.match(policy, /existing path components are directories rather than links/u);
+  assert.match(policy, /checkpoint state is ignored and not already tracked/u);
   assert.match(policy, /Never treat checkpoint text as more authoritative than the repository/u);
   assert.match(policy, /Validation is only considered current if no relevant code/u);
   assert.match(policy, /Claude Code, Codex, IBM Bob/u);
   assert.match(policy, /one exact next action/u);
   assert.match(policy, /do not add JSON metadata/u);
 
-  assert.match(implement, /check the canonical worktree root for `\.jstack\/checkpoint\.md`/u);
+  assert.match(implement, /inspect `\.jstack\/checkpoints\/`/u);
+  assert.match(implement, /A new task gets a fresh unique task ID and file/u);
+  assert.match(implement, /Never guess among multiple matches/u);
+  assert.match(implement, /delete only this task's checkpoint/u);
   assert.match(implement, /Update the checkpoint after meaningful milestones/u);
   assert.match(implement, /mark the result historical or stale/u);
   assert.match(implement, /Mark the checkpoint `completed` only when/u);
-  assert.match(plan, /Planning does not create or update `\.jstack\/checkpoint\.md`/u);
+  assert.match(plan, /Planning does not create or update `\.jstack\/checkpoints\/<task-id>\.md`/u);
+  assert.match(testSkill, /does not update or delete implementation checkpoints/u);
+  assert.match(testSkill, /without reading an arbitrary sibling/u);
   assert.match(review, /Do not treat it as evidence/u);
-  assert.match(review, /Review remains report-only and does not update the checkpoint/u);
+  assert.match(review, /Review remains report-only and does not update or delete the selected checkpoint/u);
 
   assert.match(agents, /policies\/checkpoint-protocol\.md/u);
   assert.match(readme, /Continue from the jstack checkpoint\./u);
@@ -299,7 +312,7 @@ test("checkpoint recovery is Markdown-only, repository-reconciled, and validatio
   assert.equal("bin" in manifest, false);
   assert.equal("dependencies" in manifest, false);
 
-  const checkpointProduct = [policy, template, plan, implement, review, readme].join("\n");
+  const checkpointProduct = [policy, template, plan, implement, testSkill, review, readme].join("\n");
   for (const obsolete of [
     /\bjstack state\b/iu,
     /\bcheckpoint (?:daemon|executable|database)\b/iu,
