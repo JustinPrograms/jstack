@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test"];
+const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-debug"];
 const hostRoots = [".claude/skills", ".agents/skills", ".bob/skills"];
 
 async function workspace(t) {
@@ -267,6 +267,7 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   for (const script of ["setup", "setup.ps1"]) {
     await cp(path.join(root, script), path.join(sourceClone, script));
   }
+  await cp(path.join(root, "skills"), path.join(sourceClone, "skills"), { recursive: true });
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", releaseRepo], directory).status, 0);
   const clonedArgs = (args) => args.map((arg) => {
     if (arg.endsWith("/setup")) return path.join(sourceClone, "setup").replaceAll("\\", "/");
