@@ -30,6 +30,7 @@ $jstack-implement Continue with the approved plan.
 $jstack-test Add focused regression and edge-case tests for the change.
 $jstack-review Review the resulting local change set.
 $jstack-review-pr https://github.com/owner/repo/pull/123
+$jstack-debug Investigate the cause of this failing test before changing production code.
 ```
 
 Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude`, `bob`, or `gemini` instead of `codex` when installing for those hosts.
@@ -44,6 +45,7 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-test` | Add and run focused tests for changed behavior, regressions, and reachable edge cases. | Local test edits and checks |
 | `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. Ask to include nits for optional polish suggestions. | Report-only |
 | `jstack-review-pr` | Review a named GitHub PR using its full diff, head revision, CI, and discussion. | Report-only |
+| `jstack-debug` | Investigate a bug, challenge competing causes, and hand off a supported diagnosis. | Report-only |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
@@ -63,6 +65,8 @@ skills/
     SKILL.md
   jstack-review-pr/
     SKILL.md
+  jstack-debug/
+    SKILL.md
 ```
 
 There are no platform-specific copies. The same canonical folders are installed into every supported host.
@@ -81,7 +85,7 @@ Like gstack, the easiest route is to paste an instruction into your coding agent
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
 
-The setup copier places only the six Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+The setup copier places only the seven Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
 
 ### Global setup
 
@@ -163,11 +167,11 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 ### Project paths
 
-From the JStack repository root, install the six skill folders into the project:
+From the JStack repository root, install the seven skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-debug .claude/skills/
 ```
 
 Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
@@ -176,7 +180,7 @@ For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-debug .agents/skills/
 ```
 
 Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, or `$jstack-review`.
@@ -186,7 +190,7 @@ On Windows PowerShell, use the equivalent commands below:
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-review-pr .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-review-pr, skills/jstack-debug .agents/skills
 ```
 
 After copying the folders:
@@ -232,7 +236,7 @@ A checkpoint is a recovery aid, not a substitute for Git, source inspection, use
 
 ## Shared engineering contract
 
-All six skills follow the same core rules:
+All seven skills follow the same core rules:
 
 - derive scope from the user's task and explicit acceptance criteria;
 - search for existing behavior before adding code;
