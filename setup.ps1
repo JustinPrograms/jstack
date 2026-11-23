@@ -2,7 +2,7 @@
 param(
   [Parameter(Mandatory)]
   [Alias("Host")]
-  [ValidateSet("claude", "codex", "bob", "all")]
+  [ValidateSet("claude", "codex", "bob", "gemini", "all")]
   [string]$TargetHost,
 
   [Parameter(Mandatory)]
@@ -230,6 +230,7 @@ function Get-JStackDestination([string]$hostName) {
     "claude" { ".claude/skills" }
     "codex" { ".agents/skills" }
     "bob" { ".bob/skills" }
+    "gemini" { ".gemini/skills" }
   }
   return Join-Path $basePath $hostFolder
 }
@@ -238,7 +239,7 @@ if ($InstallationScope -eq "local" -and (Get-Location).Path -eq $sourceRoot) {
   throw "For a local install, run setup from the repository receiving JStack."
 }
 
-$hosts = if ($TargetHost -eq "all") { @("claude", "codex", "bob") } else { @($TargetHost) }
+$hosts = if ($TargetHost -eq "all") { @("claude", "codex", "bob", "gemini") } else { @($TargetHost) }
 foreach ($hostName in $hosts) {
   if (-not $Verify) { Test-JStackDestination (Get-JStackDestination $hostName) }
 }
