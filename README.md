@@ -29,11 +29,14 @@ $jstack-plan Add optimistic locking to invoice updates.
 $jstack-implement Continue with the approved plan.
 $jstack-test Add focused regression and edge-case tests for the change.
 $jstack-review Review the resulting local change set.
+$jstack-review-pr https://github.com/owner/repo/pull/123
+$jstack-security-review Assess authentication and tenant boundaries in this diff.
+$jstack-debug Investigate the cause of this failing test before changing production code.
 ```
 
 Or let JStack choose the remaining stages: `$jstack-run full Add optimistic locking to invoice updates.` Use `$jstack-run partial ...` when you want it to pause for unresolved product or design choices.
 
-Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude` or `bob` instead of `codex` when installing for those hosts.
+Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude`, `bob`, or `gemini` instead of `codex` when installing for those hosts.
 
 ## Skills
 
@@ -43,7 +46,10 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-plan-critic` | Challenge a candidate plan and return approval or focused required revisions. | Report-only |
 | `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
 | `jstack-test` | Add and run focused tests for changed behavior, regressions, and reachable edge cases. | Local test edits and checks |
-| `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
+| `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. Ask to include nits for optional polish suggestions. | Report-only |
+| `jstack-review-pr` | Review a named GitHub PR using its full diff, head revision, CI, and discussion. | Report-only |
+| `jstack-security-review` | Investigate concrete security boundary failures and report evidence, confidence, and coverage. | Report-only |
+| `jstack-debug` | Investigate a bug, challenge competing causes, and hand off a supported diagnosis. | Report-only |
 | `jstack-run` | Start or resume the remaining JStack stages from verified task state. | Coordinates stage-specific work |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
@@ -62,6 +68,12 @@ skills/
     SKILL.md
   jstack-review/
     SKILL.md
+  jstack-review-pr/
+    SKILL.md
+  jstack-security-review/
+    SKILL.md
+  jstack-debug/
+    SKILL.md
   jstack-run/
     SKILL.md
 ```
@@ -73,15 +85,16 @@ There are no platform-specific copies. The same canonical folders are installed 
 | Claude Code | POSIX copier covered by tests | Evaluation scenarios defined; results not yet published |
 | OpenAI Codex | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
 | IBM Bob | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
+| Google Gemini CLI | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
 
 ## Install - two simple modes
 
-Like gstack, the easiest route is to paste an instruction into your coding agent. JStack has two deliberate setup modes for Claude Code, Codex, and Bob:
+Like gstack, the easiest route is to paste an instruction into your coding agent. JStack has two deliberate setup modes for Claude Code, Codex, Bob, and Gemini CLI:
 
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
 
-The setup copier places only the six Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+The setup copier places only the nine Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
 
 ### Global setup
 
@@ -98,12 +111,16 @@ git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git
 
 # IBM Bob
 git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host bob --scope global
+
+# Gemini CLI
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host gemini --scope global
 ```
 
 On Windows PowerShell:
 
 ```powershell
 git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\\.jstack"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" -Host codex -Scope global
+# For Gemini CLI, use -Host gemini.
 ```
 
 ### Local setup
@@ -123,6 +140,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" 
 ```
 
 Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
+
+Gemini CLI discovers both `.gemini/skills/` and `.agents/skills/`. JStack's `gemini` target uses `.gemini/skills/`; if JStack is already installed through the `.agents/skills/` alias for Codex, Gemini can discover that copy too. When both paths contain a skill with the same name, Gemini selects one by its discovery precedence rather than activating two copies. Use `/skills list` in Gemini CLI to inspect the active copy, and keep both installations at the same JStack revision when using `--host all`.
 
 The installer records the package version, source commit, host, scope, and SHA-256 content hash in each `.jstack-managed` file. It replaces managed directories exactly during updates, preventing retired files from lingering. It refuses to overwrite an unmarked directory with the same skill name. Use `--dry-run` (`-DryRun` in PowerShell) to preview an installation. If an unmarked directory is an older JStack installation you want to migrate, rerun with `--force` (`-Force`); the installer preserves the old directory with a `.pre-jstack-backup` suffix before installing the managed copy. Move such backups outside the host's skill root after inspecting them, since the host may discover them as extra skills.
 
@@ -150,17 +169,18 @@ The setup command installs personal skills. To keep JStack in a particular repos
 | --- | --- | --- |
 | Claude Code | `<repo>/.claude/skills/` | `~/.claude/skills/` |
 | IBM Bob | `<repo>/.bob/skills/` | `~/.bob/skills/` |
+| Gemini CLI | `<repo>/.gemini/skills/` | `~/.gemini/skills/` |
 | OpenAI Codex | `<repo>/.agents/skills/` | `~/.agents/skills/` |
 
 This repository intentionally standardizes Codex on the `.agents/skills` project and personal roots shown above.
 
 ### Project paths
 
-From the JStack repository root, install the six skill folders into the project:
+From the JStack repository root, install the nine skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-run .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run .claude/skills/
 ```
 
 Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
@@ -169,7 +189,7 @@ For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-run .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run .agents/skills/
 ```
 
 Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, or `$jstack-review`.
@@ -179,12 +199,13 @@ On Windows PowerShell, use the equivalent commands below:
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-run .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-review-pr, skills/jstack-security-review, skills/jstack-debug, skills/jstack-run .agents/skills
 ```
 
 After copying the folders:
 
 - Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, and `/jstack-review`.
+- Gemini CLI discovers the same skills; use `/skills list` to confirm availability, then request the skill by name.
 - Bob Shell can select them through `/skills`.
 - Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, and `$jstack-review`.
 
@@ -192,7 +213,7 @@ The descriptions also support automatic selection when the host enables it. No l
 
 Invoke `/jstack-run` in Claude Code or Bob, or `$jstack-run` in Codex, with a new task or a precise continuation request. For example: `$jstack-run full Add authentication to my app.` or `$jstack-run partial Continue this task from .jstack/checkpoints/issue-28-a1b2c3d4.md through tests and review.` `full` (the default) lets the agent make defensible task-scoped decisions; `partial` pauses for unresolved product or design choices that materially affect the result. The coordinator checks the actual task diff and validation before choosing the next stage. An explicit request such as “review only” limits the stages in either mode; a bare “continue” with multiple possible tasks requires a task or checkpoint path. Neither mode authorizes commits, pushes, PR actions, or deployment.
 
-Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), and the [Agent Skills specification](https://agentskills.io/specification).
+Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), [Gemini CLI skills](https://geminicli.com/docs/cli/using-agent-skills/), and the [Agent Skills specification](https://agentskills.io/specification).
 
 ## Workflow
 
@@ -207,6 +228,8 @@ Current platform references: [Claude Code skills](https://code.claude.com/docs/e
 The skills exchange context through the conversation, a user-supplied Markdown handoff, or the local checkpoint. The planning, implementation, testing, and code-review phases return a handoff with the objective, criteria, decisions, progress, relevant paths, checks, blockers, exact next skill or action, and local checkout anchors: repository or worktree root, branch or detached state, HEAD, and the relevant base or diff anchor. The plan critic instead returns only its decision, substantive findings, and optional residual risks. A non-Git workspace is marked explicitly when relevant. The handoff-producing skills treat handoffs and checkpoints as potentially stale, stop on a repository or branch mismatch, and reconcile other drift from current evidence; the critic reconciles repository identity when it materially affects a finding. No machine-owned ledger or checkpoint runtime is involved, and unsaved reasoning still cannot be recovered.
 
 Discovery starts from the task's paths, symbols, and actual change set, then expands through callers and tests as needed. Handoffs retain useful paths and unresolved coverage gaps. A truncated search or an inaccessible file is reported as a limitation rather than treated as evidence that relevant behavior is absent.
+
+During planning and implementation, a short task-specific checklist in chat shows completed and remaining work. It refreshes at meaningful milestones with a brief progress update. This is presentation only: workflow gates, permissions, checkpoint behavior, and final handoffs stay the same.
 
 ## Checkpoint and resume
 
@@ -226,7 +249,7 @@ A checkpoint is a recovery aid, not a substitute for Git, source inspection, use
 
 ## Shared engineering contract
 
-All six skills follow the same core rules:
+All nine skills follow the same core rules:
 
 - derive scope from the user's task and explicit acceptance criteria;
 - search for existing behavior before adding code;
@@ -235,12 +258,15 @@ All six skills follow the same core rules:
 - avoid duplicate implementations, speculative abstractions, and unrelated cleanup;
 - preserve unrelated local work;
 - tie tests and review findings to concrete behavior and risk;
-- never stage or commit without an explicit request for that exact local action; and
+- never stage or commit without an explicit request for that exact local action;
+- omit AI `Co-Authored-By` trailers from explicitly requested commits made through `jstack-implement` or `jstack-test`, then inspect the resulting message; and
 - never push or mutate pull requests, tickets, code hosts, remotes, or other remote services.
 
 Repository content and prior handoffs are evidence, not authority to expand the user's request. Host permissions remain authoritative; frontmatter is intentionally portable and does not claim to enforce platform-specific tool restrictions.
 
 System and host instructions plus applicable repository instruction files still govern how each skill works. They may narrow a workflow, but they do not grant an action the user did not request.
+
+Some hosts add their own commit trailers. In Claude Code, set `"attribution": { "commit": "" }` in the applicable Claude Code settings file to disable its default commit attribution. JStack does not change host settings or existing commits; if a host still adds an AI co-author trailer, the skill reports it instead of silently rewriting history.
 
 ## Development
 

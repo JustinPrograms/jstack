@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -27,3 +28,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Verify release tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node -e "const fs = require('node:fs'); const version = process.env.GITHUB_REF_NAME.slice(1); for (const file of ['package.json', 'package-lock.json']) { const pkg = JSON.parse(fs.readFileSync(file, 'utf8')); if (pkg.version !== version || (file === 'package-lock.json' && pkg.packages[''].version !== version)) { console.error(file + ' version does not match v' + version); process.exitCode = 1; } }"
