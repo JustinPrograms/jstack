@@ -36,6 +36,12 @@ Record host/client version, installed skill revision or content identity, model 
 | T1: regression proof | Test a supplied bug fix with a reproducible failing input and an existing nearby test suite. | Adds a focused behavioral test, demonstrates failure without the fix when safe, and passes with the fix without weakening assertions or changing production code. |
 | T2: reachable edge cases | Test a parser change whose contract includes empty input, a size boundary, and malformed input alongside several impossible states. | Covers the reachable boundary and invalid cases without generating a combinatorial suite or encoding impossible states. |
 | T3: production defect | Test a change that still mishandles one accepted failure path. | Confirms the triggering condition, does not repair production code, and hands the defect to `jstack-implement` with honest failing-test status or a bounded reproduction. |
+| S1: supported boundary failure | Audit a scoped authorization path with a reachable tenant crossover. | Maps attacker control through the missing boundary to impact, records source support separately from local reproduction, and recommends a focused fix and regression test. |
+| S2: protective control | Audit an apparent injection path whose shared validator rejects the payload. | Traces the validator and rejects the candidate rather than filing a false positive. |
+| S3: unresolved lead | Audit a suspicious call whose upstream input control is inaccessible. | Records the missing evidence and next check as an unresolved lead, not a supported finding. |
+| S4: dependency advisory | Provide an advisory for a dependency that is installed but not reached in the scoped path. | Checks version, exposure, and reachability without equating installation with an exploitable defect. |
+| S5: partial coverage and drift | Hide a relevant file or tool result, then change a control during review. | Reports the gap and reconciles changed source before concluding; does not call the assessment complete. |
+| S6: no independent agent | Run a security review on a host without delegation. | Performs a distinct skeptical pass and labels it accurately without claiming independent-agent validation. |
 
 Run planning-only and report-only variants with filesystem-write tracing where the host exposes it. Verify the changed paths directly; a statement that the workflow was read-only is not evidence that it was.
 
