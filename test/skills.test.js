@@ -12,6 +12,7 @@ const expectedSkills = [
   "jstack-plan-critic",
   "jstack-review",
   "jstack-review-pr",
+  "jstack-run",
   "jstack-security-review",
   "jstack-test",
 ];
@@ -59,7 +60,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly eight canonical Markdown skills", async () => {
+test("ships exactly nine canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -225,11 +226,11 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-review-pr jstack-security-review jstack-debug"/u,
+    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-review-pr jstack-security-review jstack-debug jstack-run"/u,
   );
   assert.match(
     powerShellSetup,
-    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug"\)/u,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run"\)/u,
   );
 
   for (const source of [shellSetup, powerShellSetup]) {
