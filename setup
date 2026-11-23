@@ -6,15 +6,17 @@ set -eu
 
 usage() {
   cat <<'EOF'
-Usage: ./setup --host <claude|codex|bob|all> --scope <global|local> [--force] [--dry-run]
+Usage: ./setup --host <claude|codex|bob|all> --scope <global|local> [--force] [--dry-run] [--verify] [--check-updates]
 
 Copies the JStack skills into the selected host's personal directory (`global`)
 or the current repository (`local`).
-No dependencies beyond a POSIX shell and standard file-copy tools are needed.
+Requires Git and a SHA-256 tool (sha256sum or shasum).
 
 Existing JStack-managed skill directories are replaced exactly so retired files
 do not survive an update. An unmarked directory is never overwritten unless
 --force is supplied; the forced migration preserves it with a backup suffix.
+--verify checks installed content without changing files. Add --check-updates
+to query remote release tags and report a newer release when one exists.
 EOF
 }
 
@@ -22,6 +24,8 @@ host=""
 scope=""
 force=0
 dry_run=0
+verify=0
+check_updates=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --host)
@@ -42,6 +46,14 @@ while [ "$#" -gt 0 ]; do
       dry_run=1
       shift
       ;;
+    --verify)
+      verify=1
+      shift
+      ;;
+    --check-updates)
+      check_updates=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -57,22 +69,160 @@ done
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(pwd -P)
+skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test"
+
+[ "$check_updates" -eq 0 ] || [ "$verify" -eq 1 ] || { usage >&2; exit 2; }
+[ "$verify" -eq 0 ] || { [ "$dry_run" -eq 0 ] && [ "$force" -eq 0 ]; } || { usage >&2; exit 2; }
+command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || {
+  echo "SHA-256 tool not available (need sha256sum or shasum)" >&2
+  exit 2
+}
+
+version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$root/package.json" | sed -n '1p')
+commit=$(git -C "$root" rev-parse HEAD 2>/dev/null) || { echo "JStack source must be a Git checkout" >&2; exit 2; }
+[ -n "$version" ] || { echo "Cannot read JStack version" >&2; exit 2; }
+
+hash_stream() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{ print $1 }'
+  else
+    echo "SHA-256 tool not available (need sha256sum or shasum)" >&2
+    return 2
+  fi
+}
+
+hash_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{ print $1 }'
+  else
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  fi
+}
+
+skill_hash() {
+  hash_root="$1"
+  [ -d "$hash_root" ] && [ ! -L "$hash_root" ] || return 1
+  [ -z "$(find "$hash_root" -type l -print)" ] || return 1
+  (
+    cd "$hash_root"
+    find . -print | LC_ALL=C sort | while IFS= read -r entry; do
+      [ "$entry" = "." ] && continue
+      [ "$entry" = "./.jstack-managed" ] && continue
+      relative=${entry#./}
+      if [ -d "$entry" ]; then
+        printf 'd:%s\n' "$relative"
+      elif [ -f "$entry" ]; then
+        printf 'f:%s:%s\n' "$relative" "$(hash_file "$entry")"
+      else
+        printf 'other:%s\n' "$relative"
+      fi
+    done
+  ) | hash_stream
+}
+
+metadata_value() {
+  sed -n "s/^$2=//p" "$1" | sed -n '1p'
+}
+
+verify_to() {
+  destination="$1"
+  selected_host="$2"
+  check_status=0
+  printf 'Verifying %s (%s/%s)\n' "$destination" "$selected_host" "$scope"
+  for skill in $skills; do
+    target="$destination/$skill"
+    marker="$target/.jstack-managed"
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+      printf '%s: missing\n' "$skill"
+      check_status=1
+    elif [ -L "$target" ] || [ ! -d "$target" ]; then
+      printf '%s: modified (not a regular directory)\n' "$skill"
+      check_status=1
+    elif [ ! -f "$marker" ] || [ -L "$marker" ]; then
+      printf '%s: unmanaged\n' "$skill"
+      check_status=1
+    else
+      installed_version=$(metadata_value "$marker" version)
+      installed_commit=$(metadata_value "$marker" commit)
+      installed_host=$(metadata_value "$marker" host)
+      installed_scope=$(metadata_value "$marker" scope)
+      installed_hash=$(metadata_value "$marker" hash)
+      if [ -z "$installed_version" ] || [ -z "$installed_commit" ] || [ -z "$installed_hash" ]; then
+        printf '%s: unmanaged (missing install metadata)\n' "$skill"
+        check_status=1
+      elif [ "$installed_host" != "$selected_host" ] || [ "$installed_scope" != "$scope" ]; then
+        printf '%s: modified (host/scope metadata mismatch)\n' "$skill"
+        check_status=1
+      else
+        actual_hash=$(skill_hash "$target") || actual_hash=""
+        source_hash=$(skill_hash "$root/skills/$skill") || source_hash=""
+        if [ -z "$actual_hash" ] || [ "$actual_hash" != "$installed_hash" ]; then
+          printf '%s: modified (hash mismatch)\n' "$skill"
+          check_status=1
+        elif [ "$installed_version" != "$version" ] || [ "$installed_commit" != "$commit" ] || [ "$installed_hash" != "$source_hash" ]; then
+          printf '%s: outdated (installed %s %s; clone %s %s)\n' "$skill" "$installed_version" "$installed_commit" "$version" "$commit"
+          check_status=1
+        else
+          printf '%s: present (%s %s)\n' "$skill" "$installed_version" "$installed_commit"
+        fi
+      fi
+    fi
+  done
+  for candidate in "$destination"/jstack-*; do
+    [ -e "$candidate" ] || [ -L "$candidate" ] || continue
+    case "${candidate##*/}" in
+      jstack-plan|jstack-plan-critic|jstack-implement|jstack-review|jstack-test) ;;
+      *) printf 'unexpected skill: %s\n' "$candidate"; check_status=1 ;;
+    esac
+  done
+  if [ "$check_status" -eq 1 ]; then
+    printf 'To reinstall this host/scope: sh "%s/setup" --host %s --scope %s\n' "$root" "$selected_host" "$scope"
+  fi
+  return "$check_status"
+}
+
+check_remote_updates() {
+  remote_tags=$(git -C "$root" ls-remote --tags --refs origin 'refs/tags/v*') || {
+    echo "Update check unavailable; verify results above are still valid." >&2
+    return 2
+  }
+  latest=$(printf '%s\n' "$remote_tags" | awk '
+    match($2, /refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+$/) {
+      v=$2; sub(/^.*\/v/, "", v); split(v, n, ".");
+      if (!found || n[1]+0 > a || (n[1]+0 == a && n[2]+0 > b) || (n[1]+0 == a && n[2]+0 == b && n[3]+0 > c)) {
+        found=1; a=n[1]+0; b=n[2]+0; c=n[3]+0; best=v
+      }
+    }
+    END { if (found) print best }
+  ')
+  [ -n "$latest" ] || { echo "No release tags found; update check unavailable." >&2; return 2; }
+  newer=$(printf '%s\n%s\n' "$version" "$latest" | awk -F. 'NR==1 { a=$1+0;b=$2+0;c=$3+0 } NR==2 { if ($1+0>a || ($1+0==a && $2+0>b) || ($1+0==a && $2+0==b && $3+0>c)) print 1; else print 0 }')
+  if [ "$newer" -eq 1 ]; then
+    printf 'Update available: v%s (clone v%s). Run: git -C "%s" fetch --tags origin && git -C "%s" switch --detach "v%s" && sh "%s/setup" --host %s --scope %s\n' "$latest" "$version" "$root" "$root" "$latest" "$root" "$host" "$scope"
+    return 1
+  fi
+  printf 'No newer tagged release (clone v%s; latest v%s).\n' "$version" "$latest"
+}
 
 install_to() {
   destination="$1"
+  selected_host="$2"
   if [ "$dry_run" -eq 1 ]; then
     printf 'Would install JStack skills in %s\n' "$destination"
     return
   fi
 
   mkdir -p "$destination"
-  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do
+  for skill in $skills; do
     target="$destination/$skill"
     temporary="$destination/.$skill.jstack-new.$$"
     backup="$target.pre-jstack-backup"
 
     cp -R "$root/skills/$skill" "$temporary"
-    : > "$temporary/.jstack-managed"
+    content_hash=$(skill_hash "$temporary")
+    printf 'version=%s\ncommit=%s\nhost=%s\nscope=%s\nhash=%s\n' "$version" "$commit" "$selected_host" "$scope" "$content_hash" > "$temporary/.jstack-managed"
 
     if [ -e "$target" ]; then
       if [ -f "$target/.jstack-managed" ]; then
@@ -94,7 +244,7 @@ install_to() {
 
 validate_destination() {
   destination="$1"
-  for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do
+  for skill in $skills; do
     target="$destination/$skill"
     if [ -e "$target" ] && [ ! -f "$target/.jstack-managed" ] && [ "$force" -ne 1 ]; then
       echo "Refusing to overwrite unmanaged skill: $target (rerun with --force to preserve and replace it)" >&2
@@ -124,17 +274,34 @@ fi
 
 case "$host" in
   claude|codex|bob)
-    validate_destination "$(destination_for "$host")"
-    install_to "$(destination_for "$host")"
+    if [ "$verify" -eq 1 ]; then
+      verify_to "$(destination_for "$host")" "$host" || overall_status=1
+    else
+      validate_destination "$(destination_for "$host")"
+      install_to "$(destination_for "$host")" "$host"
+    fi
     ;;
   all)
-    for selected_host in claude codex bob; do
-      validate_destination "$(destination_for "$selected_host")"
-    done
-    for selected_host in claude codex bob; do
-      install_to "$(destination_for "$selected_host")"
-    done
+    if [ "$verify" -eq 1 ]; then
+      for selected_host in claude codex bob; do
+        verify_to "$(destination_for "$selected_host")" "$selected_host" || overall_status=1
+      done
+    else
+      for selected_host in claude codex bob; do
+        validate_destination "$(destination_for "$selected_host")"
+      done
+      for selected_host in claude codex bob; do
+        install_to "$(destination_for "$selected_host")" "$selected_host"
+      done
+    fi
     ;;
   *) usage >&2; exit 2 ;;
 esac
+
+if [ "$check_updates" -eq 1 ]; then
+  check_remote_updates || update_result=$?
+  [ "${update_result:-0}" -eq 2 ] && exit 2
+  [ "${update_result:-0}" -eq 1 ] && overall_status=1
+fi
+exit "${overall_status:-0}"
 

@@ -221,7 +221,7 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /for skill in jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test; do/u,
+    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test"/u,
   );
   assert.match(
     powerShellSetup,

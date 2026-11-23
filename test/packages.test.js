@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -59,6 +60,28 @@ async function checkResources(directory) {
   return links;
 }
 
+async function skillHash(directory) {
+  const records = [];
+  async function walk(folder, prefix = "") {
+    for (const entry of await readdir(folder, { withFileTypes: true })) {
+      const relative = path.posix.join(prefix, entry.name);
+      if (relative === ".jstack-managed") continue;
+      assert.ok(!entry.isSymbolicLink(), `linked skill content: ${relative}`);
+      if (entry.isDirectory()) {
+        records.push([relative, `d:${relative}`]);
+        await walk(path.join(folder, entry.name), relative);
+      } else {
+        assert.ok(entry.isFile(), `unsupported skill content: ${relative}`);
+        const hash = createHash("sha256").update(await readFile(path.join(folder, entry.name))).digest("hex");
+        records.push([relative, `f:${relative}:${hash}`]);
+      }
+    }
+  }
+  await walk(directory);
+  records.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return createHash("sha256").update(records.map(([, record]) => record).join("\n") + (records.length ? "\n" : "")).digest("hex");
+}
+
 async function checkInstalled(destination, { managed = false } = {}) {
   for (const skill of skills) {
     const source = path.join(root, "skills", skill);
@@ -75,7 +98,16 @@ async function checkInstalled(destination, { managed = false } = {}) {
       assert.ok(links > 0, "implementation must link to its bundled checkpoint schema");
     }
     if (managed) {
-      assert.equal(await readFile(path.join(installed, ".jstack-managed"), "utf8"), "");
+      const metadata = Object.fromEntries(
+        (await readFile(path.join(installed, ".jstack-managed"), "utf8")).trim().split("\n").map((line) => line.split("=", 2)),
+      );
+      const host = { ".claude": "claude", ".agents": "codex", ".bob": "bob" }[path.basename(path.dirname(destination))];
+      assert.equal(metadata.version, JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version);
+      assert.equal(metadata.commit, run("git", ["-C", root, "rev-parse", "HEAD"], root).stdout.trim());
+      assert.equal(metadata.host, host);
+      assert.equal(metadata.scope, "local");
+      assert.equal(metadata.hash, await skillHash(source));
+      assert.equal(metadata.hash, await skillHash(installed));
     }
   }
 }
@@ -185,10 +217,102 @@ async function checkCollisionSafety(t, command, args, forceFlag, dryRunFlag) {
   );
 }
 
+async function checkVerification(t, command, installArgs, verifyArgs) {
+  const directory = await workspace(t);
+  const baseline = path.join(directory, "baseline");
+  await mkdir(baseline);
+  const installed = run(command, installArgs, baseline);
+  assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+  const baselineRoot = path.join(baseline, ".agents", "skills");
+  const marker = path.join(baselineRoot, "jstack-plan", ".jstack-managed");
+  const before = await readFile(marker);
+  const clean = run(command, verifyArgs, baseline);
+  assert.equal(clean.status, 0, clean.stderr || clean.stdout);
+  assert.match(clean.stdout, /jstack-plan: present/u);
+  assert.deepEqual(await readFile(marker), before, "verification must not rewrite metadata");
+
+  const scenarios = [
+    ["missing", async (root) => rm(path.join(root, "jstack-plan"), { recursive: true }), /jstack-plan: missing/u],
+    ["modified", async (root) => writeFile(path.join(root, "jstack-plan", "SKILL.md"), "changed\n"), /jstack-plan: modified \(hash mismatch\)/u],
+    ["unmanaged", async (root) => rm(path.join(root, "jstack-plan", ".jstack-managed")), /jstack-plan: unmanaged/u],
+    ["backup", async (root) => mkdir(path.join(root, "jstack-plan.pre-jstack-backup")), /unexpected skill:.*jstack-plan\.pre-jstack-backup/u],
+    ["unknown", async (root) => mkdir(path.join(root, "jstack-old")), /unexpected skill:.*jstack-old/u],
+    ["outdated", async (root) => {
+      const target = path.join(root, "jstack-plan", ".jstack-managed");
+      await writeFile(target, (await readFile(target, "utf8")).replace(/^version=.*$/mu, "version=0.0.0"));
+    }, /jstack-plan: outdated/u],
+  ];
+  for (const [name, change, expected] of scenarios) {
+    const project = path.join(directory, name);
+    await mkdir(project);
+    const targetRoot = path.join(project, ".agents", "skills");
+    await cp(baselineRoot, targetRoot, { recursive: true });
+    await change(targetRoot);
+    const result = run(command, verifyArgs, project);
+    assert.equal(result.status, 1, `${name}: ${result.stderr || result.stdout}`);
+    assert.match(result.stdout, expected, name);
+  }
+}
+
+async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
+  const directory = await workspace(t);
+  const project = path.join(directory, "project");
+  const sourceClone = path.join(directory, "source");
+  const releaseRepo = path.join(directory, "releases");
+  await mkdir(project);
+  assert.equal(run("git", ["clone", "-q", "--no-hardlinks", root, sourceClone], directory).status, 0);
+  assert.equal(run("git", ["clone", "-q", "--bare", root, releaseRepo], directory).status, 0);
+  const head = run("git", ["-C", root, "rev-parse", "HEAD"], directory).stdout.trim();
+  assert.equal(run("git", ["--git-dir", releaseRepo, "update-ref", "refs/tags/v9.0.0", head], directory).status, 0);
+  for (const script of ["setup", "setup.ps1"]) {
+    await cp(path.join(root, script), path.join(sourceClone, script));
+  }
+  assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", releaseRepo], directory).status, 0);
+  const clonedArgs = (args) => args.map((arg) => {
+    if (arg.endsWith("/setup")) return path.join(sourceClone, "setup").replaceAll("\\", "/");
+    if (arg.endsWith("\\setup.ps1")) return path.join(sourceClone, "setup.ps1");
+    return arg;
+  });
+  assert.equal(run(command, clonedArgs(installArgs), project).status, 0);
+  const marker = path.join(project, ".agents", "skills", "jstack-plan", ".jstack-managed");
+  const before = await readFile(marker);
+  const update = run(command, clonedArgs(verifyArgs), project);
+  assert.equal(update.status, 1, update.stderr || update.stdout);
+  assert.match(update.stdout, /Update available: v9\.0\.0/u);
+  assert.match(update.stdout, /fetch --tags origin/u);
+  assert.match(update.stdout, /switch --detach "?v9\.0\.0/u);
+  assert.deepEqual(await readFile(marker), before);
+
+  assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", path.join(directory, "absent")], directory).status, 0);
+  const offline = run(command, clonedArgs(verifyArgs), project);
+  assert.equal(offline.status, 2, offline.stderr || offline.stdout);
+  assert.match(offline.stdout + offline.stderr, /Update check unavailable/u);
+  assert.deepEqual(await readFile(marker), before);
+}
+
 test("POSIX setup installs and updates all local host packages without changing unrelated files", async (t) => {
   const command = shellCommand();
   if (!command) return t.skip("POSIX shell unavailable");
   await checkCopier(t, command, [path.join(root, "setup").replaceAll("\\", "/"), "--host", "all", "--scope", "local"]);
+});
+
+test("POSIX verification reports installation drift without repairing it", async (t) => {
+  const command = shellCommand();
+  if (!command) return t.skip("POSIX shell unavailable");
+  const script = path.join(root, "setup").replaceAll("\\", "/");
+  await checkVerification(t, command, [script, "--host", "codex", "--scope", "local"], [script, "--host", "codex", "--scope", "local", "--verify"]);
+});
+
+test("POSIX update check notifies for a newer tag and handles offline remotes", async (t) => {
+  const command = shellCommand();
+  if (!command) return t.skip("POSIX shell unavailable");
+  const script = path.join(root, "setup").replaceAll("\\", "/");
+  await checkUpdateNotification(
+    t,
+    command,
+    [script, "--host", "codex", "--scope", "local"],
+    [script, "--host", "codex", "--scope", "local", "--verify", "--check-updates"],
+  );
 });
 
 test("POSIX setup rejects invalid hosts before creating destinations", async (t) => {
@@ -221,6 +345,38 @@ test("PowerShell setup installs and updates all local host packages without chan
     return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
   }
   await checkCopier(t, command, ["-NoProfile", "-NonInteractive", "-File", path.join(root, "setup.ps1"), "-Host", "all", "-Scope", "local"]);
+});
+
+test("PowerShell verification reports installation drift without repairing it", async (t) => {
+  const command = powerShellCommand();
+  if (!command) return t.skip("PowerShell unavailable");
+  const policy = run(command, ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"], root);
+  if (["Restricted", "AllSigned"].includes(policy.stdout.trim())) {
+    return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
+  }
+  const script = path.join(root, "setup.ps1");
+  await checkVerification(
+    t,
+    command,
+    ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "codex", "-Scope", "local"],
+    ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "codex", "-Scope", "local", "-Verify"],
+  );
+});
+
+test("PowerShell update check notifies for a newer tag and handles offline remotes", async (t) => {
+  const command = powerShellCommand();
+  if (!command) return t.skip("PowerShell unavailable");
+  const policy = run(command, ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"], root);
+  if (["Restricted", "AllSigned"].includes(policy.stdout.trim())) {
+    return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
+  }
+  const script = path.join(root, "setup.ps1");
+  await checkUpdateNotification(
+    t,
+    command,
+    ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "codex", "-Scope", "local"],
+    ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "codex", "-Scope", "local", "-Verify", "-CheckUpdates"],
+  );
 });
 
 test("PowerShell setup previews changes and preserves unmanaged collisions", async (t) => {
