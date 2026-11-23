@@ -34,6 +34,7 @@ Small, precise changes may not need every phase. The repository's `AGENTS.md` co
 
 ## Pull requests
 
+- For a release, update the version in `package.json` and `package-lock.json` in the release PR before creating its matching `vMAJOR.MINOR.PATCH` tag. CI checks tagged releases for version drift.
 - Create a focused branch from the latest `main`.
 - Add or update tests when behavior changes.
 - Run `npm test` and any narrower relevant checks.

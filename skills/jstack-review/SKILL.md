@@ -53,7 +53,7 @@ Across those passes, check the change for:
 - duplicated rules, bypassed repository abstractions, speculative machinery, and unrelated scope; and
 - user-visible behavior or documentation that no longer matches the implementation.
 
-Prioritize concrete defects over style preferences. Do not report a possibility as a finding without a reachable failure mode or specific maintenance cost.
+Prioritize concrete defects over style preferences. Do not report a possibility as a finding without a reachable failure mode or specific maintenance cost. A preference for different wording, naming, formatting, or structure is not enough to report a nit.
 
 ## Confirm findings
 
@@ -63,15 +63,16 @@ Do not inflate severity because an area is sensitive. Severity follows demonstra
 
 ## Report
 
-List findings first, ordered by severity:
+List required findings first, ordered by severity:
 
 - **Blocker:** likely incorrect, unsafe, data-losing, or acceptance-breaking behavior that should prevent handoff.
 - **Should fix:** a real defect or material regression risk that should be addressed before completion.
-- **Nit:** a bounded, worthwhile improvement that does not affect correctness; omit nits that add noise.
 
-For each finding, give a concise title, severity, exact path and line when available, the failure scenario or impact, supporting evidence, and the smallest fix direction. Keep optional follow-up separate from required corrections.
+By default, omit nits from the findings list and handoff. A nit is an optional, bounded improvement with a specific maintenance or readability benefit, not a subjective preference or a weak defect claim. If the user explicitly asks for nits, polish, or a strict review, put useful nits in a short **Optional improvements** section after required findings. Group related suggestions, avoid repeating the same preference across files, and state why each is worth the user's time. Keep this section separate from required corrections and never route it as work `jstack-implement` must complete. A request to include nits does not relax the evidence standard for blockers and should-fix findings.
 
-If there are no findings, say so directly and note residual risks or checks not run. End with the review target, checks performed, and an exact next action: return blockers and should-fix items to `jstack-implement`, or hand a clean result back to the user for their chosen local next step. Do not promise approval or claim tests passed unless you observed them.
+For each required finding, give a concise title, severity, exact path and line when available, the failure scenario or impact, supporting evidence, and the smallest fix direction. For an optional improvement, give a path and a concrete benefit without presenting it as a failure.
+
+If there are no required findings, say so directly, even when optional improvements were requested, and note residual risks or checks not run. End with the review target, checks performed, and an exact next action: return blockers and should-fix items to `jstack-implement`, or hand a clean result back to the user for their chosen local next step. Do not promise approval or claim tests passed unless you observed them.
 
 A clean review means no actionable defect was found in the inspected target; it does not prove the change is defect-free. Keep that statement brief and name only material gaps in coverage or validation.
 
