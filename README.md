@@ -119,7 +119,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" 
 
 Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
 
-The installer marks directories it owns and replaces those directories exactly during updates, preventing removed package files from lingering. It refuses to overwrite an unmarked directory with the same skill name. Use `--dry-run` (`-DryRun` in PowerShell) to preview an installation. If an unmarked directory is an older JStack installation you want to migrate, rerun with `--force` (`-Force`); the installer preserves the old directory with a `.pre-jstack-backup` suffix before installing the managed copy.
+The installer records the package version, source commit, host, scope, and SHA-256 content hash in each `.jstack-managed` file. It replaces managed directories exactly during updates, preventing retired files from lingering. It refuses to overwrite an unmarked directory with the same skill name. Use `--dry-run` (`-DryRun` in PowerShell) to preview an installation. If an unmarked directory is an older JStack installation you want to migrate, rerun with `--force` (`-Force`); the installer preserves the old directory with a `.pre-jstack-backup` suffix before installing the managed copy. Move such backups outside the host's skill root after inspecting them, since the host may discover them as extra skills.
+
+### Verify and check for updates
+
+Verification reads the selected installation and reports each skill as present, missing, modified, unmanaged, or outdated relative to the local JStack clone. It also flags leftover backup and unknown `jstack-*` folders. It never repairs files or contacts the network. Exit status is 0 when healthy and 1 when attention is needed.
+
+```sh
+sh ~/.jstack/setup --host codex --scope global --verify
+sh ~/.jstack/setup --host codex --scope global --verify --check-updates
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.jstack\setup.ps1" -Host codex -Scope global -Verify
+powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.jstack\setup.ps1" -Host codex -Scope global -Verify -CheckUpdates
+```
+
+`--check-updates` / `-CheckUpdates` is opt-in and read-only. It queries the Git remote for stable `vMAJOR.MINOR.PATCH` tags, compares the latest tag to the local clone's package version, and prints a command to fetch and install that exact tag if a newer release exists. That command leaves the clone detached at the chosen release. The check itself never fetches, switches, or reinstalls. If the network or release tags are unavailable, it reports that the update check could not finish and exits 2; the local verification results remain valid. Normal installation and skill use do not contact the network. Run the printed command when you choose to update. Verification and update checks require Git plus `sha256sum` or `shasum` on POSIX; PowerShell uses its built-in SHA-256 support.
 
 ## Manual project install
 
@@ -225,7 +241,7 @@ Node.js is used only for development tests; it is not a product requirement for 
 npm test
 ```
 
-The tests validate skill packages, portable frontmatter, documented safety boundaries, native discovery paths, and absence of the retired executable architecture. Package tests check bundled resource containment and exercise available setup copiers in temporary local destinations, including repeat updates and preservation of unrelated files. Native copier tests report a skip when the required shell is unavailable or PowerShell policy prevents unsigned script execution; they do not alter that policy.
+The tests validate skill packages, portable frontmatter, documented safety boundaries, native discovery paths, and absence of the retired executable architecture. Package tests check bundled resource containment and exercise available setup copiers in temporary local destinations, including repeat installs, verification failures, update notices, offline behavior, and preservation of unrelated files. Native copier tests report a skip when the required shell is unavailable or PowerShell policy prevents unsigned script execution; they do not alter that policy.
 
 Static tests do not establish agent behavior or token savings. The [architecture contract](docs/architecture.md) records the accepted scope, and [workflow evaluation scenarios](docs/workflow-evaluations.md) define the separate host checks and their current evidence.
 
