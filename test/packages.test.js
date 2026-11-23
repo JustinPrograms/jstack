@@ -270,7 +270,7 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", releaseRepo], directory).status, 0);
   const clonedArgs = (args) => args.map((arg) => {
     if (arg.endsWith("/setup")) return path.join(sourceClone, "setup").replaceAll("\\", "/");
-    if (arg.endsWith("\\setup.ps1")) return path.join(sourceClone, "setup.ps1");
+    if (arg.endsWith("/setup.ps1") || arg.endsWith("\\setup.ps1")) return path.join(sourceClone, "setup.ps1");
     return arg;
   });
   assert.equal(run(command, clonedArgs(installArgs), project).status, 0);
