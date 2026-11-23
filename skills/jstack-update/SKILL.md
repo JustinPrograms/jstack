@@ -9,7 +9,7 @@ Update the JStack skills for the host running this conversation when the user in
 
 ## Locate the installation
 
-1. Identify the current host (`claude`, `codex`, or `bob`) and the intended scope (`global` or `local`). Global roots are `~/.claude/skills`, `~/.agents/skills`, and `~/.bob/skills`; local roots are the corresponding folders in the current project. If both scopes have JStack installed and the user did not select one, ask which to update. Do not update another host or scope by inference.
+1. Identify the current host (`claude`, `codex`, `bob`, or `gemini`) and the intended scope (`global` or `local`). Global roots are `~/.claude/skills`, `~/.agents/skills`, `~/.bob/skills`, and `~/.gemini/skills`; local roots are the corresponding folders in the current project. If both scopes have JStack installed and the user did not select one, ask which to update. Do not update another host or scope by inference.
 2. Locate the JStack source checkout. Try the documented `~/.jstack` location first. If absent, ask for the checkout path. Do not clone into or overwrite an existing path without the user's direction. Require a Git checkout containing `package.json`, the applicable `setup` or `setup.ps1`, and `skills/jstack-update/SKILL.md`.
 3. Read the selected installation's `.jstack-managed` markers and inspect the skill folders. Refuse to replace modified or unmanaged JStack folders, unexpected `jstack-*` folders, or backup folders; report the paths and the appropriate manual recovery. Missing managed skills may be restored. Never use `--force` / `-Force` automatically.
 

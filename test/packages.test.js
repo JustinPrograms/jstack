@@ -8,8 +8,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-update"];
-const hostRoots = [".claude/skills", ".agents/skills", ".bob/skills"];
+const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run", "jstack-update"];
+const hostRoots = [".claude/skills", ".agents/skills", ".bob/skills", ".gemini/skills"];
 
 async function workspace(t) {
   const temporaryRoot = await realpath(os.tmpdir());
@@ -82,7 +82,7 @@ async function skillHash(directory) {
   return createHash("sha256").update(records.map(([, record]) => record).join("\n") + (records.length ? "\n" : "")).digest("hex");
 }
 
-async function checkInstalled(destination, { managed = false } = {}) {
+async function checkInstalled(destination, { managed = false, scope = "local" } = {}) {
   for (const skill of skills) {
     const source = path.join(root, "skills", skill);
     const installed = path.join(destination, skill);
@@ -101,11 +101,11 @@ async function checkInstalled(destination, { managed = false } = {}) {
       const metadata = Object.fromEntries(
         (await readFile(path.join(installed, ".jstack-managed"), "utf8")).trim().split("\n").map((line) => line.split("=", 2)),
       );
-      const host = { ".claude": "claude", ".agents": "codex", ".bob": "bob" }[path.basename(path.dirname(destination))];
+      const host = { ".claude": "claude", ".agents": "codex", ".bob": "bob", ".gemini": "gemini" }[path.basename(path.dirname(destination))];
       assert.equal(metadata.version, JSON.parse(await readFile(path.join(root, "package.json"), "utf8")).version);
       assert.equal(metadata.commit, run("git", ["-C", root, "rev-parse", "HEAD"], root).stdout.trim());
       assert.equal(metadata.host, host);
-      assert.equal(metadata.scope, "local");
+      assert.equal(metadata.scope, scope);
       assert.equal(metadata.hash, await skillHash(source));
       assert.equal(metadata.hash, await skillHash(installed));
     }
@@ -131,8 +131,8 @@ test("package validation rejects missing and out-of-package resources", async (t
   await assert.rejects(checkResources(skill), /resource escapes installed skill/u);
 });
 
-function run(command, args, cwd) {
-  const result = spawnSync(command, args, { cwd, encoding: "utf8", timeout: 15000, windowsHide: true });
+function run(command, args, cwd, env = process.env) {
+  const result = spawnSync(command, args, { cwd, env, encoding: "utf8", timeout: 15000, windowsHide: true });
   if (result.error) throw result.error;
   assert.equal(result.signal, null, result.stderr);
   return result;
@@ -181,7 +181,7 @@ async function checkCopier(t, command, args) {
 
   const second = run(command, args, project);
   assert.equal(second.status, 0, second.stderr || second.stdout);
-  assert.deepEqual((await readdir(project)).sort(), [".agents", ".bob", ".claude", "README.md"].sort());
+  assert.deepEqual((await readdir(project)).sort(), [".agents", ".bob", ".claude", ".gemini", "README.md"].sort());
   assert.equal(await readFile(path.join(project, "README.md"), "utf8"), "unrelated project file\n");
   for (const hostRoot of hostRoots) {
     const destination = path.join(project, hostRoot);
@@ -192,10 +192,10 @@ async function checkCopier(t, command, args) {
   }
 }
 
-async function checkCollisionSafety(t, command, args, forceFlag, dryRunFlag) {
+async function checkCollisionSafety(t, command, args, forceFlag, dryRunFlag, hostRoot = ".agents") {
   const directory = await workspace(t);
   const project = path.join(directory, "project");
-  const destination = path.join(project, ".agents", "skills");
+  const destination = path.join(project, hostRoot, "skills");
   const target = path.join(destination, "jstack-plan");
   await mkdir(target, { recursive: true });
   await writeFile(path.join(target, "SKILL.md"), "custom skill\n");
@@ -215,6 +215,20 @@ async function checkCollisionSafety(t, command, args, forceFlag, dryRunFlag) {
     await readFile(path.join(destination, "jstack-plan.pre-jstack-backup", "SKILL.md"), "utf8"),
     "custom skill\n",
   );
+}
+
+async function checkGeminiGlobal(t, command, installArgs, verifyArgs) {
+  const directory = await workspace(t);
+  const home = path.join(directory, "isolated home");
+  await mkdir(home);
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const destination = path.join(home, ".gemini", "skills");
+  const installed = run(command, installArgs, directory, env);
+  assert.equal(installed.status, 0, installed.stderr || installed.stdout);
+  await checkInstalled(destination, { managed: true, scope: "global" });
+  const verified = run(command, verifyArgs, directory, env);
+  assert.equal(verified.status, 0, verified.stderr || verified.stdout);
+  assert.match(verified.stdout, /jstack-plan: present/u);
 }
 
 async function checkVerification(t, command, installArgs, verifyArgs) {
@@ -263,11 +277,12 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   assert.equal(run("git", ["clone", "-q", "--no-hardlinks", root, sourceClone], directory).status, 0);
   assert.equal(run("git", ["clone", "-q", "--bare", root, releaseRepo], directory).status, 0);
   const head = run("git", ["-C", root, "rev-parse", "HEAD"], directory).stdout.trim();
-  assert.equal(run("git", ["--git-dir", releaseRepo, "update-ref", "refs/tags/v9.0.0", head], directory).status, 0);
+  assert.equal(run("git", ["--git-dir", releaseRepo, "update-ref", "refs/tags/v0.2.2", head], directory).status, 0);
   for (const script of ["setup", "setup.ps1"]) {
     await cp(path.join(root, script), path.join(sourceClone, script));
   }
-  await cp(path.join(root, "skills", "jstack-update"), path.join(sourceClone, "skills", "jstack-update"), { recursive: true });
+  await cp(path.join(root, "skills"), path.join(sourceClone, "skills"), { recursive: true });
+  await cp(path.join(root, "package.json"), path.join(sourceClone, "package.json"));
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", releaseRepo], directory).status, 0);
   const clonedArgs = (args) => args.map((arg) => {
     if (arg.endsWith("/setup")) return path.join(sourceClone, "setup").replaceAll("\\", "/");
@@ -277,11 +292,12 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   assert.equal(run(command, clonedArgs(installArgs), project).status, 0);
   const marker = path.join(project, ".agents", "skills", "jstack-plan", ".jstack-managed");
   const before = await readFile(marker);
+  assert.match(before.toString(), /^version=0\.2\.1$/mu);
   const update = run(command, clonedArgs(verifyArgs), project);
   assert.equal(update.status, 1, update.stderr || update.stdout);
-  assert.match(update.stdout, /Update available: v9\.0\.0/u);
+  assert.match(update.stdout, /Update available: v0\.2\.2/u);
   assert.match(update.stdout, /fetch --tags origin/u);
-  assert.match(update.stdout, /switch --detach "?v9\.0\.0/u);
+  assert.match(update.stdout, /switch --detach "?v0\.2\.2/u);
   assert.deepEqual(await readFile(marker), before);
 
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", path.join(directory, "absent")], directory).status, 0);
@@ -335,6 +351,23 @@ test("POSIX setup previews changes and preserves unmanaged collisions", async (t
     "--force",
     "--dry-run",
   );
+});
+
+test("POSIX Gemini setup handles local install and collision safety", async (t) => {
+  const command = shellCommand();
+  if (!command) return t.skip("POSIX shell unavailable");
+  const script = path.join(root, "setup").replaceAll("\\", "/");
+  await checkCollisionSafety(t, command, [script, "--host", "gemini", "--scope", "local"], "--force", "--dry-run", ".gemini");
+  const preview = run(command, [script, "--host", "gemini", "--scope", "global", "--dry-run"], root);
+  assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+  assert.match(preview.stdout, /\.gemini[\\/]skills/u);
+});
+
+test("POSIX Gemini setup installs and verifies global skills in an isolated home", async (t) => {
+  const command = shellCommand();
+  if (!command) return t.skip("POSIX shell unavailable");
+  const script = path.join(root, "setup").replaceAll("\\", "/");
+  await checkGeminiGlobal(t, command, [script, "--host", "gemini", "--scope", "global"], [script, "--host", "gemini", "--scope", "global", "--verify"]);
 });
 
 test("PowerShell setup installs and updates all local host packages without changing unrelated files", async (t) => {
@@ -395,5 +428,26 @@ test("PowerShell setup previews changes and preserves unmanaged collisions", asy
     "-Force",
     "-DryRun",
   );
+});
+
+test("PowerShell Gemini setup handles local install and collision safety", async (t) => {
+  const command = powerShellCommand();
+  if (!command) return t.skip("PowerShell unavailable");
+  const policy = run(command, ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"], root);
+  if (["Restricted", "AllSigned"].includes(policy.stdout.trim())) return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
+  const script = path.join(root, "setup.ps1");
+  await checkCollisionSafety(t, command, ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "gemini", "-Scope", "local"], "-Force", "-DryRun", ".gemini");
+  const preview = run(command, ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "gemini", "-Scope", "global", "-DryRun"], root);
+  assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+  assert.match(preview.stdout, /\.gemini[\\/]skills/u);
+});
+
+test("PowerShell Gemini setup installs and verifies global skills in an isolated home", async (t) => {
+  const command = powerShellCommand();
+  if (!command) return t.skip("PowerShell unavailable");
+  const policy = run(command, ["-NoProfile", "-NonInteractive", "-Command", "Get-ExecutionPolicy"], root);
+  if (["Restricted", "AllSigned"].includes(policy.stdout.trim())) return t.skip(`PowerShell execution policy ${policy.stdout.trim()} prevents running the unsigned setup script`);
+  const script = path.join(root, "setup.ps1");
+  await checkGeminiGlobal(t, command, ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "gemini", "-Scope", "global"], ["-NoProfile", "-NonInteractive", "-File", script, "-Host", "gemini", "-Scope", "global", "-Verify"]);
 });
 

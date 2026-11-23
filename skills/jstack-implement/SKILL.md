@@ -14,10 +14,27 @@ The user's current request defines the scope and authority. Follow system and ho
 - Never run `git push` or create, update, comment on, approve, close, or merge a pull request or merge request.
 - Never mutate a ticket system, code host, Git remote, Git configuration, or another remote service.
 - Never stage or commit unless the user explicitly requests that exact local Git action in the current conversation.
+- When a commit is explicitly requested, do not add a `Co-Authored-By` trailer crediting an AI assistant (such as Claude, Codex, or Gemini). Inspect the resulting commit message; if the host adds an AI co-author trailer despite this instruction, report it rather than silently amending or rewriting the commit.
 - Preserve unrelated staged, unstaged, and untracked work. Do not overwrite or clean up changes outside the task.
 - Keep secrets, personal or customer data, internal URLs, full ticket text, unnecessary verbatim source, and large diffs out of generated files, logs, handoffs, and the final report. Repository-relative paths, symbols, and concise paraphrases are allowed when needed.
 
 Read-only local Git inspection and relevant read-only retrieval are allowed when the host permits them. A clear request to implement or fix authorizes task-scoped source and test edits plus proportionate local checks unless the user narrows that authority. It does not authorize Git-history or remote changes.
+
+## Show progress in chat
+
+At the start, show a short Markdown checklist in the conversation using `- [ ]` for unfinished work and `- [x]` for completed work. Derive concrete, task-specific items from the requested change or plan, including verification and final diff inspection. For example:
+
+```text
+- [ ] Add the login endpoint
+- [ ] Connect the login form
+- [ ] Handle invalid credentials
+- [ ] Run focused tests
+- [ ] Check the final diff against acceptance criteria
+```
+
+Refresh the checklist at meaningful milestones with a brief sentence explaining what changed, what comes next, or what is blocked; do not repeat it after every tool call. Keep blocked work unchecked and explain the blocker beside it or in the accompanying sentence. Check an item only when supported by current evidence. Writing tests does not mean they passed; keep test creation and execution distinct when both are needed, and never check off failed, skipped, or interrupted validation as passed. Reopen items when relevant changes invalidate their completion.
+
+On resume, reconcile progress with the current task and checkout before showing prior items as complete. The chat checklist presents the existing work; it does not add workflow steps, approvals, files, or checkpoint writes. Keep it consistent with any existing checkpoint under the unchanged checkpoint rules, and retain the final handoff.
 
 ## Establish the implementation target
 

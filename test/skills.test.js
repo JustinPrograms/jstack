@@ -6,10 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedSkills = [
+  "jstack-debug",
   "jstack-implement",
   "jstack-plan",
   "jstack-plan-critic",
   "jstack-review",
+  "jstack-review-pr",
+  "jstack-run",
+  "jstack-security-review",
   "jstack-test",
   "jstack-update",
 ];
@@ -57,7 +61,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly six canonical Markdown skills", async () => {
+test("ships exactly ten canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -208,6 +212,7 @@ test("documentation uses native host discovery paths", async () => {
 
   assert.match(readme, /\.claude\/skills/u);
   assert.match(readme, /\.bob\/skills/u);
+  assert.match(readme, /\.gemini\/skills/u);
   assert.match(readme, /<repo>\/\.agents\/skills\//u);
   assert.match(readme, /~\/\.agents\/skills\//u);
   assert.match(readme, /Install JStack globally for this host/u);
@@ -230,23 +235,24 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-update"/u,
+    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-review-pr jstack-security-review jstack-debug jstack-run jstack-update"/u,
   );
   assert.match(
     powerShellSetup,
-    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-update"\)/u,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run", "jstack-update"\)/u,
   );
 
   for (const source of [shellSetup, powerShellSetup]) {
     assert.match(source, /\.claude[\\/]skills/u);
     assert.match(source, /\.agents[\\/]skills/u);
     assert.match(source, /\.bob[\\/]skills/u);
+    assert.match(source, /\.gemini[\\/]skills/u);
   }
 
-  assert.match(shellSetup, /--host <claude\|codex\|bob\|all> --scope <global\|local>/u);
+  assert.match(shellSetup, /--host <claude\|codex\|bob\|gemini\|all> --scope <global\|local>/u);
   assert.match(shellSetup, /global:claude/u);
   assert.match(shellSetup, /local:claude/u);
-  assert.match(powerShellSetup, /ValidateSet\("claude", "codex", "bob", "all"\)/u);
+  assert.match(powerShellSetup, /ValidateSet\("claude", "codex", "bob", "gemini", "all"\)/u);
   assert.match(powerShellSetup, /Alias\("Host"\)/u);
   assert.match(powerShellSetup, /ValidateSet\("global", "local"\)/u);
   assert.match(powerShellSetup, /Alias\("Scope"\)/u);
