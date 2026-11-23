@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedSkills = [
+  "jstack-debug",
   "jstack-implement",
   "jstack-plan",
   "jstack-plan-critic",
@@ -56,7 +57,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly five canonical Markdown skills", async () => {
+test("ships exactly six canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -222,11 +223,11 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test"/u,
+    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-debug"/u,
   );
   assert.match(
     powerShellSetup,
-    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test"\)/u,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-debug"\)/u,
   );
 
   for (const source of [shellSetup, powerShellSetup]) {
