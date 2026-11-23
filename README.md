@@ -42,6 +42,7 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-implement` | Apply an explicitly requested plan or precise change and run proportionate local checks. | Local edits and checks |
 | `jstack-test` | Add and run focused tests for changed behavior, regressions, and reachable edge cases. | Local test edits and checks |
 | `jstack-review` | Review a local change set and report prioritized, evidence-backed findings. | Report-only |
+| `jstack-update` | Check stable releases and update this host's managed JStack skills on request. | Managed skill update |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
@@ -58,6 +59,8 @@ skills/
   jstack-test/
     SKILL.md
   jstack-review/
+    SKILL.md
+  jstack-update/
     SKILL.md
 ```
 
@@ -137,6 +140,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.jstack\setup.ps1" -H
 
 `--check-updates` / `-CheckUpdates` is opt-in and read-only. It queries the Git remote for stable `vMAJOR.MINOR.PATCH` tags, compares the latest tag to the local clone's package version, and prints a command to fetch and install that exact tag if a newer release exists. That command leaves the clone detached at the chosen release. The check itself never fetches, switches, or reinstalls. If the network or release tags are unavailable, it reports that the update check could not finish and exits 2; the local verification results remain valid. Normal installation and skill use do not contact the network. Run the printed command when you choose to update. Verification and update checks require Git plus `sha256sum` or `shasum` on POSIX; PowerShell uses its built-in SHA-256 support.
 
+After installing a release that includes `jstack-update`, ask your coding agent to run `/jstack-update` in Claude Code or Bob IDE, or `$jstack-update` in Codex. The skill checks the selected host and scope, reports the proposed stable release, and can use the existing copier to install and verify it. It checks only when invoked; it does not run in the background. The source clone is expected at `~/.jstack`; if it is elsewhere, give the agent its path. If both global and local installations exist, specify which one to update. The update leaves the source clone detached at the selected tag and refuses to replace modified or unmanaged skill folders.
+
+Existing installations need a one-time manual update before this new skill appears. From your JStack clone, fetch the release tag, switch to it, and rerun setup for your host and scope using the commands above. If the clone or installed skills contain local changes, inspect them before updating. Restart the host if the skill does not appear immediately.
+
 ## Manual project install
 
 The setup command installs personal skills. To keep JStack in a particular repository for teammates, copy each complete `skills/<skill-name>/` folder into that host's project skill root. Preserve the directory name and the `SKILL.md` file inside it.
@@ -151,37 +158,37 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 ### Project paths
 
-From the JStack repository root, install the five skill folders into the project:
+From the JStack repository root, install the six skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-update .claude/skills/
 ```
 
-Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
+Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, `/jstack-review`, or `/jstack-update`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
 
 For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-update .agents/skills/
 ```
 
-Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, or `$jstack-review`.
+Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, `$jstack-review`, or `$jstack-update`.
 
 On Windows PowerShell, use the equivalent commands below:
 
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-update .agents/skills
 ```
 
 After copying the folders:
 
-- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, and `/jstack-review`.
+- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, `/jstack-review`, and `/jstack-update`.
 - Bob Shell can select them through `/skills`.
-- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, and `$jstack-review`.
+- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, `$jstack-review`, and `$jstack-update`.
 
 The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 

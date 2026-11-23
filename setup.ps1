@@ -23,7 +23,7 @@ param(
 # This is deliberately only an installer: it does not run as part of JStack.
 $sourceRoot = $PSScriptRoot
 $ErrorActionPreference = "Stop"
-$skillNames = @("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test")
+$skillNames = @("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-update")
 $version = (Get-Content -LiteralPath (Join-Path $sourceRoot "package.json") -Raw | ConvertFrom-Json).version
 $commit = (& git -C $sourceRoot rev-parse HEAD 2>$null)
 if ($LASTEXITCODE -ne 0 -or -not $commit) { throw "JStack source must be a Git checkout" }
