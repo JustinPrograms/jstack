@@ -31,7 +31,7 @@ if ($CheckUpdates -and -not $Verify) { throw "-CheckUpdates requires -Verify" }
 if ($Verify -and ($Force -or $DryRun)) { throw "-Verify cannot be combined with -Force or -DryRun" }
 
 function Get-JStackSkillHash([string]$folder) {
-  $rootItem = Get-Item -LiteralPath $folder
+  $rootItem = Get-Item -LiteralPath $folder -Force
   if (-not $rootItem.PSIsContainer -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     throw "Not a regular skill directory: $folder"
   }
@@ -87,7 +87,7 @@ function Test-JStackInstallation([string]$destination, [string]$hostName) {
       $attention = $true
       continue
     }
-    $targetItem = Get-Item -LiteralPath $target
+    $targetItem = Get-Item -LiteralPath $target -Force
     if (-not $targetItem.PSIsContainer -or ($targetItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
       Write-Host "${skillName}: modified (not a regular directory)"
       $attention = $true
@@ -98,7 +98,7 @@ function Test-JStackInstallation([string]$destination, [string]$hostName) {
       $attention = $true
       continue
     }
-    $markerItem = Get-Item -LiteralPath $marker
+    $markerItem = Get-Item -LiteralPath $marker -Force
     if ($markerItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
       Write-Host "${skillName}: unmanaged (linked marker)"
       $attention = $true
