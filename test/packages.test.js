@@ -263,10 +263,11 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   assert.equal(run("git", ["clone", "-q", "--no-hardlinks", root, sourceClone], directory).status, 0);
   assert.equal(run("git", ["clone", "-q", "--bare", root, releaseRepo], directory).status, 0);
   const head = run("git", ["-C", root, "rev-parse", "HEAD"], directory).stdout.trim();
-  assert.equal(run("git", ["--git-dir", releaseRepo, "update-ref", "refs/tags/v9.0.0", head], directory).status, 0);
+  assert.equal(run("git", ["--git-dir", releaseRepo, "update-ref", "refs/tags/v0.2.2", head], directory).status, 0);
   for (const script of ["setup", "setup.ps1"]) {
     await cp(path.join(root, script), path.join(sourceClone, script));
   }
+  await cp(path.join(root, "package.json"), path.join(sourceClone, "package.json"));
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", releaseRepo], directory).status, 0);
   const clonedArgs = (args) => args.map((arg) => {
     if (arg.endsWith("/setup")) return path.join(sourceClone, "setup").replaceAll("\\", "/");
@@ -276,11 +277,12 @@ async function checkUpdateNotification(t, command, installArgs, verifyArgs) {
   assert.equal(run(command, clonedArgs(installArgs), project).status, 0);
   const marker = path.join(project, ".agents", "skills", "jstack-plan", ".jstack-managed");
   const before = await readFile(marker);
+  assert.match(before.toString(), /^version=0\.2\.1$/mu);
   const update = run(command, clonedArgs(verifyArgs), project);
   assert.equal(update.status, 1, update.stderr || update.stdout);
-  assert.match(update.stdout, /Update available: v9\.0\.0/u);
+  assert.match(update.stdout, /Update available: v0\.2\.2/u);
   assert.match(update.stdout, /fetch --tags origin/u);
-  assert.match(update.stdout, /switch --detach "?v9\.0\.0/u);
+  assert.match(update.stdout, /switch --detach "?v0\.2\.2/u);
   assert.deepEqual(await readFile(marker), before);
 
   assert.equal(run("git", ["-C", sourceClone, "remote", "set-url", "origin", path.join(directory, "absent")], directory).status, 0);
