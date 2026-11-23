@@ -69,7 +69,7 @@ done
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 project_root=$(pwd -P)
-skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-security-review"
+skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-security-review jstack-debug"
 
 [ "$check_updates" -eq 0 ] || [ "$verify" -eq 1 ] || { usage >&2; exit 2; }
 [ "$verify" -eq 0 ] || { [ "$dry_run" -eq 0 ] && [ "$force" -eq 0 ]; } || { usage >&2; exit 2; }
@@ -173,7 +173,7 @@ verify_to() {
   for candidate in "$destination"/jstack-*; do
     [ -e "$candidate" ] || [ -L "$candidate" ] || continue
     case "${candidate##*/}" in
-      jstack-plan|jstack-plan-critic|jstack-implement|jstack-review|jstack-test|jstack-security-review) ;;
+      jstack-plan|jstack-plan-critic|jstack-implement|jstack-review|jstack-test|jstack-security-review|jstack-debug) ;;
       *) printf 'unexpected skill: %s\n' "$candidate"; check_status=1 ;;
     esac
   done
