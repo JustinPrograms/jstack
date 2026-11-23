@@ -20,6 +20,21 @@ The user's current request defines the scope and authority. Follow system and ho
 
 Read-only local Git inspection is allowed. Use read-only remote retrieval only when it is relevant, explicitly requested where necessary, and permitted by the host.
 
+## Show progress in chat
+
+At the start, show a short Markdown checklist in the conversation using `- [ ]` for unfinished work and `- [x]` for completed work. Adapt the labels to the task while covering discovery, risks and test coverage, drafting, and the plan critic. For example:
+
+```text
+- [ ] Inspect the current auth flow
+- [ ] Check session handling, edge cases, and test coverage
+- [ ] Draft implementation steps
+- [ ] Critique and finalize the plan
+```
+
+Refresh the checklist at meaningful milestones with a brief sentence explaining the finding, next step, or blocker; do not repeat it after every tool call. Keep blocked work unchecked and explain the blocker beside it or in the accompanying sentence. Check an item only when the corresponding work is complete; keep critique/finalization unchecked until the critic returns `APPROVE`. Reopen an item if new evidence requires more work.
+
+This is a chat presentation of the existing workflow, not an additional gate or approval request. Keep it in the conversation; it does not create files, alter checkpoint behavior, or replace the final plan and handoff. These boxes track planning progress; future implementation steps in the delivered plan remain unfinished.
+
 ## Establish the task
 
 1. Identify every repository or worktree in scope, read its instructions, and inspect current Git status before broad exploration. If a workspace is not a Git repository, say so and use explicit filesystem evidence instead of inventing branch or diff state.

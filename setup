@@ -6,7 +6,7 @@ set -eu
 
 usage() {
   cat <<'EOF'
-Usage: ./setup --host <claude|codex|bob|all> --scope <global|local> [--force] [--dry-run] [--verify] [--check-updates]
+Usage: ./setup --host <claude|codex|bob|gemini|all> --scope <global|local> [--force] [--dry-run] [--verify] [--check-updates]
 
 Copies the JStack skills into the selected host's personal directory (`global`)
 or the current repository (`local`).
@@ -259,9 +259,11 @@ destination_for() {
     global:claude) printf '%s\n' "$HOME/.claude/skills" ;;
     global:codex) printf '%s\n' "$HOME/.agents/skills" ;;
     global:bob) printf '%s\n' "$HOME/.bob/skills" ;;
+    global:gemini) printf '%s\n' "$HOME/.gemini/skills" ;;
     local:claude) printf '%s\n' "$project_root/.claude/skills" ;;
     local:codex) printf '%s\n' "$project_root/.agents/skills" ;;
     local:bob) printf '%s\n' "$project_root/.bob/skills" ;;
+    local:gemini) printf '%s\n' "$project_root/.gemini/skills" ;;
     *) usage >&2; exit 2 ;;
   esac
 }
@@ -273,7 +275,7 @@ if [ "$scope" = "local" ] && [ "$project_root" = "$root" ]; then
 fi
 
 case "$host" in
-  claude|codex|bob)
+  claude|codex|bob|gemini)
     if [ "$verify" -eq 1 ]; then
       verify_to "$(destination_for "$host")" "$host" || overall_status=1
     else
@@ -283,14 +285,14 @@ case "$host" in
     ;;
   all)
     if [ "$verify" -eq 1 ]; then
-      for selected_host in claude codex bob; do
+      for selected_host in claude codex bob gemini; do
         verify_to "$(destination_for "$selected_host")" "$selected_host" || overall_status=1
       done
     else
-      for selected_host in claude codex bob; do
+      for selected_host in claude codex bob gemini; do
         validate_destination "$(destination_for "$selected_host")"
       done
-      for selected_host in claude codex bob; do
+      for selected_host in claude codex bob gemini; do
         install_to "$(destination_for "$selected_host")" "$selected_host"
       done
     fi
