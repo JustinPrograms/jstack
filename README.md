@@ -31,7 +31,7 @@ $jstack-test Add focused regression and edge-case tests for the change.
 $jstack-review Review the resulting local change set.
 ```
 
-Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude` or `bob` instead of `codex` when installing for those hosts.
+Planning and review are report-only. Implementation changes local task files, while testing changes local tests and fixtures; neither workflow stages, commits, pushes, or mutates remote services. Use `claude`, `bob`, or `gemini` instead of `codex` when installing for those hosts.
 
 ## Skills
 
@@ -68,10 +68,11 @@ There are no platform-specific copies. The same canonical folders are installed 
 | Claude Code | POSIX copier covered by tests | Evaluation scenarios defined; results not yet published |
 | OpenAI Codex | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
 | IBM Bob | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
+| Google Gemini CLI | POSIX and PowerShell copiers covered by tests | Evaluation scenarios defined; results not yet published |
 
 ## Install - two simple modes
 
-Like gstack, the easiest route is to paste an instruction into your coding agent. JStack has two deliberate setup modes for Claude Code, Codex, and Bob:
+Like gstack, the easiest route is to paste an instruction into your coding agent. JStack has two deliberate setup modes for Claude Code, Codex, Bob, and Gemini CLI:
 
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
@@ -93,12 +94,16 @@ git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git
 
 # IBM Bob
 git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host bob --scope global
+
+# Gemini CLI
+git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git ~/.jstack && sh ~/.jstack/setup --host gemini --scope global
 ```
 
 On Windows PowerShell:
 
 ```powershell
 git clone --single-branch --depth 1 https://github.com/JustinPrograms/jstack.git "$HOME\\.jstack"; powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" -Host codex -Scope global
+# For Gemini CLI, use -Host gemini.
 ```
 
 ### Local setup
@@ -118,6 +123,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\\.jstack\\setup.ps1" 
 ```
 
 Use `--host all` to install for every supported host. Restart the host if it does not immediately discover newly installed skills. To update later, pull the clone and rerun the same mode, for example `git -C ~/.jstack pull --ff-only && sh ~/.jstack/setup --host codex --scope global`.
+
+Gemini CLI discovers both `.gemini/skills/` and `.agents/skills/`. JStack's `gemini` target uses `.gemini/skills/`; if JStack is already installed through the `.agents/skills/` alias for Codex, Gemini can discover that copy too. When both paths contain a skill with the same name, Gemini selects one by its discovery precedence rather than activating two copies. Use `/skills list` in Gemini CLI to inspect the active copy, and keep both installations at the same JStack revision when using `--host all`.
 
 The installer records the package version, source commit, host, scope, and SHA-256 content hash in each `.jstack-managed` file. It replaces managed directories exactly during updates, preventing retired files from lingering. It refuses to overwrite an unmarked directory with the same skill name. Use `--dry-run` (`-DryRun` in PowerShell) to preview an installation. If an unmarked directory is an older JStack installation you want to migrate, rerun with `--force` (`-Force`); the installer preserves the old directory with a `.pre-jstack-backup` suffix before installing the managed copy. Move such backups outside the host's skill root after inspecting them, since the host may discover them as extra skills.
 
@@ -145,6 +152,7 @@ The setup command installs personal skills. To keep JStack in a particular repos
 | --- | --- | --- |
 | Claude Code | `<repo>/.claude/skills/` | `~/.claude/skills/` |
 | IBM Bob | `<repo>/.bob/skills/` | `~/.bob/skills/` |
+| Gemini CLI | `<repo>/.gemini/skills/` | `~/.gemini/skills/` |
 | OpenAI Codex | `<repo>/.agents/skills/` | `~/.agents/skills/` |
 
 This repository intentionally standardizes Codex on the `.agents/skills` project and personal roots shown above.
@@ -180,12 +188,13 @@ Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-
 After copying the folders:
 
 - Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, and `/jstack-review`.
+- Gemini CLI discovers the same skills; use `/skills list` to confirm availability, then request the skill by name.
 - Bob Shell can select them through `/skills`.
 - Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, and `$jstack-review`.
 
 The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 
-Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), and the [Agent Skills specification](https://agentskills.io/specification).
+Current platform references: [Claude Code skills](https://code.claude.com/docs/en/slash-commands), [IBM Bob skills](https://bob.ibm.com/docs/shell/features/skills), [OpenAI skills](https://learn.chatgpt.com/docs/build-skills), [Gemini CLI skills](https://geminicli.com/docs/cli/using-agent-skills/), and the [Agent Skills specification](https://agentskills.io/specification).
 
 ## Workflow
 

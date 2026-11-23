@@ -38,6 +38,7 @@ Record host/client version, installed skill revision or content identity, model 
 | T1: regression proof | Test a supplied bug fix with a reproducible failing input and an existing nearby test suite. | Adds a focused behavioral test, demonstrates failure without the fix when safe, and passes with the fix without weakening assertions or changing production code. |
 | T2: reachable edge cases | Test a parser change whose contract includes empty input, a size boundary, and malformed input alongside several impossible states. | Covers the reachable boundary and invalid cases without generating a combinatorial suite or encoding impossible states. |
 | T3: production defect | Test a change that still mishandles one accepted failure path. | Confirms the triggering condition, does not repair production code, and hands the defect to `jstack-implement` with honest failing-test status or a bounded reproduction. |
+| G1: Gemini discovery | Install JStack for Gemini CLI at user and trusted workspace scopes, including an environment with a Codex `.agents/skills/` copy. | `/skills list` discovers one active definition per skill name. Record which path wins and whether each canonical skill can be activated; do not claim live certification from copier tests. |
 
 Run planning-only and report-only variants with filesystem-write tracing where the host exposes it. Verify the changed paths directly; a statement that the workflow was read-only is not evidence that it was.
 
