@@ -15,6 +15,7 @@ const expectedSkills = [
   "jstack-run",
   "jstack-security-review",
   "jstack-test",
+  "jstack-update",
 ];
 const handoffSkills = ["jstack-implement", "jstack-plan", "jstack-review", "jstack-test"];
 
@@ -60,7 +61,7 @@ function parseSkill(source) {
   return { metadata, body: match[2] };
 }
 
-test("ships exactly nine canonical Markdown skills", async () => {
+test("ships exactly ten canonical Markdown skills", async () => {
   const entries = await readdir(path.join(root, "skills"), { withFileTypes: true });
   const directories = (
     await Promise.all(
@@ -137,6 +138,7 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
   );
 
   for (const [name, source] of Object.entries(skills)) {
+    if (name === "jstack-update") continue;
     assert.match(source, /Never run `git push`/u, `${name} must forbid pushes`);
     assert.match(source, /Never stage or commit unless/u, `${name} must protect Git history`);
     assert.match(source, /Never mutate a ticket system/u, `${name} must forbid remote mutations`);
@@ -164,6 +166,13 @@ test("each skill keeps its phase boundary and permanent remote boundary", async 
   assert.match(skills["jstack-plan-critic"], /Keep this workflow read-only and report-only/u);
   assert.match(skills["jstack-plan-critic"], /Do not implement code/u);
   assert.match(skills["jstack-plan-critic"], /Do not silently modify the plan/u);
+  const update = skills["jstack-update"];
+  assert.match(update, /Do not check for releases during other JStack workflows/u);
+  assert.match(update, /Never use `--force` \/ `-Force` automatically/u);
+  assert.match(update, /Check that the source checkout has no staged, unstaged, or untracked changes/u);
+  assert.match(update, /Compare the newest stable tag with the selected installation's managed version/u);
+  assert.match(update, /Run the same copier with `--verify` \/ `-Verify`/u);
+  assert.match(update, /Do not stage, commit, push/u);
 });
 
 test("plan requires an approved plan-critic pass before implementation handoff", async () => {
@@ -226,11 +235,11 @@ test("optional setup copiers install only the canonical skills into host roots",
 
   assert.match(
     shellSetup,
-    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-review-pr jstack-security-review jstack-debug jstack-run"/u,
+    /skills="jstack-plan jstack-plan-critic jstack-implement jstack-review jstack-test jstack-review-pr jstack-security-review jstack-debug jstack-run jstack-update"/u,
   );
   assert.match(
     powerShellSetup,
-    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run"\)/u,
+    /\$skillNames = @\("jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run", "jstack-update"\)/u,
   );
 
   for (const source of [shellSetup, powerShellSetup]) {

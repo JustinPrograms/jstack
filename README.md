@@ -51,6 +51,7 @@ Planning and review are report-only. Implementation changes local task files, wh
 | `jstack-security-review` | Investigate concrete security boundary failures and report evidence, confidence, and coverage. | Report-only |
 | `jstack-debug` | Investigate a bug, challenge competing causes, and hand off a supported diagnosis. | Report-only |
 | `jstack-run` | Start or resume the remaining JStack stages from verified task state. | Coordinates stage-specific work |
+| `jstack-update` | Check stable releases and update this host's managed JStack skills on request. | Managed skill update |
 
 The names are deliberately namespaced. Hosts can reserve generic names such as `plan` and `review`, so names like `jstack-review` remain selectable without replacing a built-in command.
 
@@ -76,6 +77,8 @@ skills/
     SKILL.md
   jstack-run/
     SKILL.md
+  jstack-update/
+    SKILL.md
 ```
 
 There are no platform-specific copies. The same canonical folders are installed into every supported host.
@@ -94,7 +97,7 @@ Like gstack, the easiest route is to paste an instruction into your coding agent
 - **Global** installs the skills once for your user account, available in every project.
 - **Local** copies the skills into the current repository so the project can carry its own JStack setup.
 
-The setup copier places only the nine Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
+The setup copier places only the ten Markdown skill folders. It installs no dependencies and never changes your PATH, shell profile, Git configuration, or existing project files outside a local skill directory.
 
 ### Global setup
 
@@ -161,6 +164,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$HOME\.jstack\setup.ps1" -H
 
 `--check-updates` / `-CheckUpdates` is opt-in and read-only. It queries the Git remote for stable `vMAJOR.MINOR.PATCH` tags, compares the latest tag to the local clone's package version, and prints a command to fetch and install that exact tag if a newer release exists. That command leaves the clone detached at the chosen release. The check itself never fetches, switches, or reinstalls. If the network or release tags are unavailable, it reports that the update check could not finish and exits 2; the local verification results remain valid. Normal installation and skill use do not contact the network. Run the printed command when you choose to update. Verification and update checks require Git plus `sha256sum` or `shasum` on POSIX; PowerShell uses its built-in SHA-256 support.
 
+After installing a release that includes `jstack-update`, ask your coding agent to run `/jstack-update` in Claude Code or Bob IDE, `$jstack-update` in Codex, or request `jstack-update` by name in Gemini CLI. The skill checks the selected host and scope, reports the proposed stable release, and can use the existing copier to install and verify it. It checks only when invoked; it does not run in the background. The source clone is expected at `~/.jstack`; if it is elsewhere, give the agent its path. If both global and local installations exist, specify which one to update. The update leaves the source clone detached at the selected tag and refuses to replace modified or unmanaged skill folders.
+
+Existing installations need a one-time manual update before this new skill appears. From your JStack clone, fetch the release tag, switch to it, and rerun setup for your host and scope using the commands above. If the clone or installed skills contain local changes, inspect them before updating. Restart the host if the skill does not appear immediately.
+
 ## Manual project install
 
 The setup command installs personal skills. To keep JStack in a particular repository for teammates, copy each complete `skills/<skill-name>/` folder into that host's project skill root. Preserve the directory name and the `SKILL.md` file inside it.
@@ -176,38 +183,38 @@ This repository intentionally standardizes Codex on the `.agents/skills` project
 
 ### Project paths
 
-From the JStack repository root, install the nine skill folders into the project:
+From the JStack repository root, install the ten skill folders into the project:
 
 ```sh
 mkdir -p .claude/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run .claude/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run skills/jstack-update .claude/skills/
 ```
 
-Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, or `/jstack-review`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
+Start Claude Code in the project, then invoke `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, `/jstack-review`, or `/jstack-update`. To make the skills available in every project, use `~/.claude/skills/` as the destination instead.
 
 For a Codex project, use the equivalent target:
 
 ```sh
 mkdir -p .agents/skills
-cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run .agents/skills/
+cp -R skills/jstack-plan skills/jstack-plan-critic skills/jstack-implement skills/jstack-test skills/jstack-review skills/jstack-review-pr skills/jstack-security-review skills/jstack-debug skills/jstack-run skills/jstack-update .agents/skills/
 ```
 
-Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, or `$jstack-review`.
+Start Codex in the project, open `/skills` to confirm availability, then invoke `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, `$jstack-review`, or `$jstack-update`.
 
 On Windows PowerShell, use the equivalent commands below:
 
 ```powershell
 # OpenAI Codex project install
 New-Item -ItemType Directory -Force .agents/skills | Out-Null
-Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-review-pr, skills/jstack-security-review, skills/jstack-debug, skills/jstack-run .agents/skills
+Copy-Item -Recurse skills/jstack-plan, skills/jstack-plan-critic, skills/jstack-implement, skills/jstack-test, skills/jstack-review, skills/jstack-review-pr, skills/jstack-security-review, skills/jstack-debug, skills/jstack-run, skills/jstack-update .agents/skills
 ```
 
 After copying the folders:
 
-- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, and `/jstack-review`.
+- Claude Code and Bob IDE expose the skills as `/jstack-plan`, `/jstack-plan-critic`, `/jstack-implement`, `/jstack-test`, `/jstack-review`, and `/jstack-update`.
 - Gemini CLI discovers the same skills; use `/skills list` to confirm availability, then request the skill by name.
 - Bob Shell can select them through `/skills`.
-- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, and `$jstack-review`.
+- Codex can select them through `/skills` or mention them as `$jstack-plan`, `$jstack-plan-critic`, `$jstack-implement`, `$jstack-test`, `$jstack-review`, and `$jstack-update`.
 
 The descriptions also support automatic selection when the host enables it. No launcher, shell-profile change, generated configuration, or product runtime is part of installation.
 
@@ -249,7 +256,7 @@ A checkpoint is a recovery aid, not a substitute for Git, source inspection, use
 
 ## Shared engineering contract
 
-All nine skills follow the same core rules:
+The engineering workflow skills follow the same core rules:
 
 - derive scope from the user's task and explicit acceptance criteria;
 - search for existing behavior before adding code;

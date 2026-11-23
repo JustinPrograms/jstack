@@ -8,7 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run"];
+const skills = ["jstack-plan", "jstack-plan-critic", "jstack-implement", "jstack-review", "jstack-test", "jstack-review-pr", "jstack-security-review", "jstack-debug", "jstack-run", "jstack-update"];
 const hostRoots = [".claude/skills", ".agents/skills", ".bob/skills", ".gemini/skills"];
 
 async function workspace(t) {
