@@ -14,6 +14,7 @@ The user's current request defines the scope and authority. Follow system and ho
 - Never run `git push` or create, update, comment on, approve, close, or merge a pull request or merge request.
 - Never mutate a ticket system, code host, Git remote, Git configuration, or another remote service.
 - Never stage or commit unless the user explicitly requests that exact local Git action in the current conversation.
+- When a commit is explicitly requested, do not add a `Co-Authored-By` trailer crediting an AI assistant (such as Claude, Codex, or Gemini). Inspect the resulting commit message; if the host adds an AI co-author trailer despite this instruction, report it rather than silently amending or rewriting the commit.
 - Preserve unrelated staged, unstaged, and untracked work. Do not overwrite or clean up changes outside the task.
 - Keep secrets, personal or customer data, internal URLs, full ticket text, unnecessary verbatim source, and large diffs out of generated files, logs, handoffs, and the final report. Repository-relative paths, symbols, and concise paraphrases are allowed when needed.
 
