@@ -1,0 +1,84 @@
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Stable release tag (for example, v0.3.3)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: release-token
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.release-token.outputs.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Update package, tag commit, and publish release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_BOT: ${{ steps.release-token.outputs.app-slug }}[bot]
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable vMAJOR.MINOR.PATCH tag" >&2
+            exit 1
+          fi
+
+          version="${RELEASE_TAG#v}"
+          current=$(node -p 'require("./package.json").version')
+          if [[ "$current" != "$version" ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+              echo "Tag $RELEASE_TAG already exists with a different package version" >&2
+              exit 1
+            fi
+            node -e 'const next=process.argv[1].split(".").map(Number),current=process.argv[2].split(".").map(Number); for(let i=0;i<3;i++){if(next[i]!==current[i])process.exit(next[i]>current[i]?0:1)} process.exit(1)' "$version" "$current" || {
+              echo "Release version must be newer than $current" >&2
+              exit 1
+            }
+            npm version "$version" --no-git-tag-version
+          fi
+
+          npm ci
+          npm test
+
+          git config user.name "$RELEASE_BOT"
+          git config user.email "$RELEASE_BOT@users.noreply.github.com"
+          if [[ "$current" != "$version" ]]; then
+            git add package.json package-lock.json
+            git commit -m "chore: prepare $RELEASE_TAG release"
+            git push origin HEAD:main
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null; then
+            git fetch origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            if [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")" != "$(git rev-parse HEAD)" ]]; then
+              echo "Existing tag $RELEASE_TAG does not point to the versioned commit" >&2
+              exit 1
+            fi
+          else
+            git tag -a "$RELEASE_TAG" -m "Release $RELEASE_TAG"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "$RELEASE_TAG"
+          fi
