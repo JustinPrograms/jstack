@@ -168,6 +168,10 @@ After installing a release that includes `jstack-update`, ask your coding agent 
 
 Existing installations need a one-time manual update before this new skill appears. From your JStack clone, fetch the release tag, switch to it, and rerun setup for your host and scope using the commands above. If the clone or installed skills contain local changes, inspect them before updating. Restart the host if the skill does not appear immediately.
 
+## Publishing a release
+
+In GitHub Actions, open **Publish release**, choose **Run workflow** on `main`, and enter a new stable tag such as `v0.3.3`. The workflow updates `package.json` and `package-lock.json`, runs the tests, commits the version to `main`, then creates the tag and GitHub Release. Rerunning it after a partial failure resumes from the versioned commit or tag when they already exist. Create releases through this workflow so the tag contains the matching package version.
+
 ## Manual project install
 
 The setup command installs personal skills. To keep JStack in a particular repository for teammates, copy each complete `skills/<skill-name>/` folder into that host's project skill root. Preserve the directory name and the `SKILL.md` file inside it.
