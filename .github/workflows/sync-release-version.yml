@@ -4,9 +4,15 @@ on:
   push:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing stable release tag to sync
+        required: true
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: sync-release-version
@@ -24,9 +30,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - name: Update version on main
+      - name: Open version update PR
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "Expected a stable vMAJOR.MINOR.PATCH tag" >&2
@@ -35,8 +42,8 @@ jobs:
 
           tag_commit=$(git rev-parse "refs/tags/$RELEASE_TAG^{}")
           main_commit=$(git rev-parse HEAD)
-          if [[ "$tag_commit" != "$main_commit" ]]; then
-            echo "Release tag must point to the current tip of main" >&2
+          if ! git merge-base --is-ancestor "$tag_commit" "$main_commit"; then
+            echo "Release tag must point to a commit on main" >&2
             exit 1
           fi
 
@@ -45,6 +52,8 @@ jobs:
             exit 0
           fi
 
+          branch="release/sync-$RELEASE_TAG"
+          git switch -c "$branch"
           npm version "${RELEASE_TAG#v}" --no-git-tag-version
           npm ci
           npm test
@@ -53,4 +62,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
           git commit -m "chore: sync package version to $RELEASE_TAG"
-          git push origin HEAD:main
+          git push origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore: sync package version to $RELEASE_TAG" \
+            --body "Update package.json and package-lock.json for the $RELEASE_TAG release. Tests passed in the release workflow."
